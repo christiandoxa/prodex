@@ -2282,7 +2282,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "base64 0.23.1",
  "criterion",
@@ -2295,7 +2295,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2369,7 +2369,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-audit-log"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2383,11 +2383,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-bench-support"
-version = "0.167.3"
+version = "0.167.4"
 
 [[package]]
 name = "prodex-cli"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "clap",
  "prodex-mojo-core",
@@ -2399,7 +2399,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-codex-config"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "toml",
@@ -2407,14 +2407,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-config"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-context"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "serde",
@@ -2422,7 +2422,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-core"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2433,7 +2433,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "serde",
@@ -2444,7 +2444,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-housekeeping"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-core",
  "prodex-runtime-log",
@@ -2453,7 +2453,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-mcp-stdio"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "prodex-mojo-core",
@@ -2462,18 +2462,18 @@ dependencies = [
 
 [[package]]
 name = "prodex-mojo-core"
-version = "0.167.3"
+version = "0.167.4"
 
 [[package]]
 name = "prodex-observability"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
 ]
 
 [[package]]
 name = "prodex-optional-tools"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "libc",
@@ -2489,7 +2489,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-presidio"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "prodex-cli",
@@ -2503,7 +2503,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -2521,7 +2521,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-identity"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2533,7 +2533,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "serde",
@@ -2544,7 +2544,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "prodex-provider-core",
@@ -2552,7 +2552,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-quota"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2568,7 +2568,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "serde_json",
@@ -2576,7 +2576,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "prodex-runtime-state",
@@ -2587,7 +2587,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker-log"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "prodex-runtime-broker",
@@ -2595,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-cookies"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "chrono",
  "prodex-mojo-core",
@@ -2605,7 +2605,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-doctor"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "prodex-mojo-core",
@@ -2618,7 +2618,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-launch"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "prodex-codex-config",
@@ -2635,7 +2635,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-log"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "fs2",
  "libc",
@@ -2647,7 +2647,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "prodex-core",
@@ -2659,7 +2659,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "base64 0.23.1",
  "httpdate",
@@ -2676,7 +2676,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-quota"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "chrono",
  "prodex-mojo-core",
@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "prodex-provider-core",
@@ -2699,7 +2699,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-store"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "prodex-runtime-state",
@@ -2710,14 +2710,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
 ]
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "aes-gcm-siv",
  "apple-native-keyring-store",
@@ -2735,7 +2735,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-session-store"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2751,7 +2751,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-codex-fs"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2767,7 +2767,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-types"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-quota",
  "prodex-runtime-proxy",
@@ -2777,7 +2777,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-state"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "prodex-mojo-core",
  "prodex-provider-core",
@@ -2787,7 +2787,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-terminal-ui"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -2799,7 +2799,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-update-notice"
-version = "0.167.3"
+version = "0.167.4"
 dependencies = [
  "anyhow",
  "chrono",
