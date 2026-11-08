@@ -530,7 +530,7 @@ unsafe extern "C" {
     ) -> i64;
     fn prodex_runtime_websocket_event_kind_v1(abi_version: i64, kind: u64, output: *mut i64)
     -> i64;
-    fn prodex_runtime_proxy_path_plan_v1(
+    fn prodex_runtime_proxy_path_plan_v2(
         abi_version: i64,
         path_address: u64,
         path_length: i64,

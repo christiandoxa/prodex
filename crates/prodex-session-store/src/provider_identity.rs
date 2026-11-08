@@ -71,7 +71,7 @@ pub fn migrate_legacy_openai_provider(
             databases.push((version, path));
         }
     }
-    databases.sort_by(|left, right| right.0.cmp(&left.0));
+    databases.sort_by_key(|(version, _)| std::cmp::Reverse(*version));
     databases.truncate(MAX_DATABASES);
     let databases = databases
         .into_iter()

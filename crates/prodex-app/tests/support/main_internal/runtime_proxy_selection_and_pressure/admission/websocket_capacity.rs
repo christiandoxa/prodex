@@ -192,3 +192,81 @@ fn bounded_idle_connection_cache_evicts_idle_not_new_work_01651() {
         }
     });
 }
+
+#[test]
+fn http_only_launch_mount_falls_back_locally_and_preserves_websocket_clients() {
+    for observe_inspection in [false, true] {
+        let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+            "ready",
+            "second-account",
+            "ready@example.com",
+        )
+        .build();
+        let (paths, state) = {
+            let runtime = harness.shared().runtime.lock().unwrap();
+            (runtime.paths.clone(), runtime.state.clone())
+        };
+        if observe_inspection {
+            fs::create_dir_all(&paths.root).unwrap();
+            fs::write(
+                paths.root.join("policy.toml"),
+                "version = 1\n[governance]\nmode = \"enterprise_observe\"\ninspection = \"observe\"\n",
+            )
+            .unwrap();
+        }
+        let _logs = TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", paths.root.to_str().unwrap());
+        let backend = RuntimeProxyBackend::start();
+        let proxy =
+            start_runtime_rotation_proxy(&paths, &state, "ready", backend.base_url(), false)
+                .unwrap();
+
+        let forced_path = "/_prodex/http/backend-api/prodex/responses";
+        let stream = TcpStream::connect(proxy.listen_addr).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let rejected =
+            tungstenite::client(format!("ws://{}{forced_path}", proxy.listen_addr), stream);
+        assert!(matches!(
+            rejected,
+            Err(tungstenite::HandshakeError::Failure(tungstenite::Error::Http(response)))
+                if response.status().as_u16() == 426
+        ));
+        assert!(backend.websocket_requests().is_empty());
+        assert!(backend.responses_accounts().is_empty());
+
+        // Other clients retain their ordinary Responses WebSocket on the shared
+        // broker while a recursive exec uses its own HTTP transport preference.
+        let mut websocket = connect_local(&proxy);
+        websocket
+            .send(WsMessage::Ping(b"other-client".to_vec().into()))
+            .unwrap();
+        assert_eq!(
+            websocket.read().unwrap(),
+            WsMessage::Pong(b"other-client".to_vec().into())
+        );
+        let _ = websocket.close(None);
+        let _ = websocket.get_mut().shutdown(std::net::Shutdown::Both);
+
+        let response = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+            .post(format!("http://{}{forced_path}", proxy.listen_addr))
+            .json(&serde_json::json!({"model": "gpt-5", "input": []}))
+            .send()
+            .unwrap();
+        assert!(response.status().is_success());
+        let body = response.text().unwrap();
+        assert!(body.contains("response.completed"), "{body}");
+        assert_eq!(
+            backend.responses_accounts(),
+            vec!["second-account".to_string()]
+        );
+        drop(proxy);
+    }
+}

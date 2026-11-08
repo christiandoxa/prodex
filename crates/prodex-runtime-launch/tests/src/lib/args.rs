@@ -28,22 +28,17 @@ fn runtime_proxy_codex_args_keep_workspace_bootstrap_codex_owned() {
     .map(|arg| arg.to_string_lossy().into_owned())
     .collect::<Vec<_>>();
 
-    assert!(!args.iter().any(|arg| {
-        arg.starts_with("chatgpt_base_url=") || arg.starts_with("openai_base_url=")
-    }));
+    assert!(!args.iter().any(|arg| arg.starts_with("chatgpt_base_url=")));
+    assert!(args.iter().any(|arg| arg == "model_provider=\"openai\""));
     assert!(
         args.iter()
-            .any(|arg| { arg == "model_provider=\"prodex-openai-governed-http\"" })
+            .any(|arg| { arg == "openai_base_url=\"http://127.0.0.1:4455/backend-api/prodex\"" })
     );
-    assert!(args.iter().any(|arg| {
-        arg == "model_providers.prodex-openai-governed-http.base_url=\"http://127.0.0.1:4455/backend-api/prodex\""
-    }));
-    assert!(args.iter().any(|arg| {
-        arg == "model_providers.prodex-openai-governed-http.requires_openai_auth=true"
-    }));
-    assert!(args.iter().any(|arg| {
-        arg == "model_providers.prodex-openai-governed-http.supports_websockets=true"
-    }));
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg.contains("prodex-openai-governed-http"))
+    );
     assert!(args.iter().any(|arg| arg == "service_tier=null"));
     assert!(
         args.iter()
@@ -232,25 +227,51 @@ fn runtime_proxy_passthrough_args_force_governed_responses_to_http() {
     .map(|arg| arg.to_string_lossy().into_owned())
     .collect::<Vec<_>>();
 
-    let governed_provider = args
-        .iter()
-        .rposition(|arg| arg == "model_provider=\"prodex-openai-governed-http\"")
-        .expect("governed provider override should exist");
-    let user_provider = args
-        .iter()
-        .position(|arg| arg == "model_provider=\"openai\"")
-        .expect("user provider override should remain visible");
-    assert!(governed_provider > user_provider);
-    assert!(args.iter().any(|arg| {
-        arg == "model_providers.prodex-openai-governed-http.supports_websockets=false"
-    }));
-    assert!(args.iter().any(|arg| {
-        arg == "model_providers.prodex-openai-governed-http.supports_standalone_web_search=true"
-    }));
-    assert!(args.iter().any(|arg| {
-        arg == "model_providers.prodex-openai-governed-http.base_url=\"http://127.0.0.1:4455/v1\""
-    }));
+    assert!(args.iter().any(|arg| arg == "model_provider=\"openai\""));
+    assert!(
+        args.iter()
+            .any(|arg| { arg == "openai_base_url=\"http://127.0.0.1:4455/_prodex/http/v1\"" })
+    );
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg.contains("prodex-openai-governed-http"))
+    );
     assert_eq!(args.last().map(String::as_str), Some("hello"));
+}
+
+#[test]
+fn runtime_proxy_codex_args_preserve_native_openai_resume_identity() {
+    let session_id = "00000000-0000-4000-8000-000000000001";
+    for command in [
+        vec!["resume", session_id],
+        vec!["exec", "resume", session_id],
+    ] {
+        for force_http_responses in [false, true] {
+            let user_args = command
+                .iter()
+                .map(|arg| OsString::from(*arg))
+                .collect::<Vec<_>>();
+            let args = runtime_proxy_codex_passthrough_args(
+                Some(RuntimeProxyCodexEndpoint {
+                    listen_addr: "127.0.0.1:4455".parse().unwrap(),
+                    openai_mount_path: "/backend-api/prodex",
+                    local_model_provider_id: None,
+                    force_http_responses,
+                    realtime_ws_base_url: None,
+                    realtime_ws_model: None,
+                }),
+                &user_args,
+            );
+
+            assert_eq!(codex_resume_session_id(&args), Some(session_id));
+            assert!(args.iter().any(|arg| arg == "model_provider=\"openai\""));
+            assert!(!args.iter().any(|arg| {
+                arg.to_string_lossy()
+                    .contains("prodex-openai-governed-http")
+            }));
+        }
+    }
 }
 
 #[test]

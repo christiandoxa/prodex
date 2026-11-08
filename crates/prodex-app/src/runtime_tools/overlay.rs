@@ -496,6 +496,9 @@ fn prepare_overlay_launch(
                 &prepared.paths,
                 &strategy.codex_args,
             )?;
+        crate::app_commands::runtime_launch::resume_repair::migrate_legacy_openai_sessions_for_launch(
+            prepared, &strategy.codex_args, strategy.resume_session_path.as_deref(),
+        )?;
     }
     crate::runtime_launch::emit_runtime_timing("startup.resume_repair_ms", stage_started);
     let stage_started = Instant::now();

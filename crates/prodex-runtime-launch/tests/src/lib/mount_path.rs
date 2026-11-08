@@ -16,7 +16,8 @@ fn runtime_proxy_launch_uses_mojo_mount_path_normalization() {
     .map(|arg| arg.to_string_lossy().into_owned())
     .collect::<Vec<_>>();
 
-    assert!(args.iter().any(|arg| {
-        arg == "model_providers.prodex-openai-governed-http.base_url=\"http://127.0.0.1:4455/v1\""
-    }));
+    assert!(
+        args.iter()
+            .any(|arg| { arg == "openai_base_url=\"http://127.0.0.1:4455/v1\"" })
+    );
 }

@@ -23,11 +23,17 @@ pub(super) fn capture_runtime_proxy_websocket_request(
 }
 
 fn runtime_proxy_websocket_response_inspection_policy(
+    path_and_query: &str,
     rollout: prodex_config::GovernanceRolloutMode,
 ) -> Option<(&'static str, Option<u16>)> {
+    let path = prodex_mojo_core::rich::runtime_proxy_path_plan(path_and_query, true)
+        .expect("Mojo runtime proxy path planning returned invalid output");
+    let force_http = path.responses && path.http_only_prefix_len > 0;
     match rollout {
-        prodex_config::GovernanceRolloutMode::Off => None,
-        prodex_config::GovernanceRolloutMode::Observe => Some(("observe", None)),
+        prodex_config::GovernanceRolloutMode::Off => force_http.then_some(("off", Some(426))),
+        prodex_config::GovernanceRolloutMode::Observe => {
+            Some(("observe", force_http.then_some(426)))
+        }
         prodex_config::GovernanceRolloutMode::Enforce => Some(("enforce", Some(426))),
     }
 }
@@ -214,6 +220,7 @@ fn handle_runtime_proxy_websocket_inspection_policy(
     shared: &RuntimeRotationProxyShared,
 ) -> Option<tiny_http::Request> {
     let Some((rollout, fallback_status)) = runtime_proxy_websocket_response_inspection_policy(
+        request.url(),
         shared.runtime_config.governance.inspection,
     ) else {
         return Some(request);
@@ -243,7 +250,7 @@ fn handle_runtime_proxy_websocket_inspection_policy(
     };
     let _ = request.respond(build_runtime_proxy_text_response(
         status,
-        "governance enforcement requires HTTPS Responses transport fallback",
+        "runtime policy requires HTTP Responses transport fallback",
     ));
     None
 }
@@ -269,20 +276,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_websocket_response_inspection_fails_closed_only_in_enforce_rollout() {
+    fn native_websocket_response_transport_preserves_inspection_and_launch_policy() {
         use prodex_config::GovernanceRolloutMode::{Enforce, Observe, Off};
 
+        let responses = "/backend-api/prodex/responses";
+        let forced_responses = "/_prodex/http/backend-api/prodex/responses";
         assert_eq!(
-            runtime_proxy_websocket_response_inspection_policy(Off),
+            runtime_proxy_websocket_response_inspection_policy(responses, Off),
             None
         );
         assert_eq!(
-            runtime_proxy_websocket_response_inspection_policy(Observe),
+            runtime_proxy_websocket_response_inspection_policy(forced_responses, Off),
+            Some(("off", Some(426)))
+        );
+        assert_eq!(
+            runtime_proxy_websocket_response_inspection_policy(responses, Observe),
             Some(("observe", None))
         );
         assert_eq!(
-            runtime_proxy_websocket_response_inspection_policy(Enforce),
-            Some(("enforce", Some(426)))
+            runtime_proxy_websocket_response_inspection_policy(forced_responses, Observe),
+            Some(("observe", Some(426)))
         );
+        for path in [responses, forced_responses] {
+            assert_eq!(
+                runtime_proxy_websocket_response_inspection_policy(path, Enforce),
+                Some(("enforce", Some(426)))
+            );
+        }
+
+        // The launch marker applies only to Responses. Preserve realtime's
+        // existing observe/enforce policy independently of that marker.
+        for path in [
+            "/backend-api/prodex/realtime",
+            "/_prodex/http/backend-api/prodex/realtime",
+        ] {
+            assert_eq!(
+                runtime_proxy_websocket_response_inspection_policy(path, Off),
+                None
+            );
+            assert_eq!(
+                runtime_proxy_websocket_response_inspection_policy(path, Observe),
+                Some(("observe", None))
+            );
+            assert_eq!(
+                runtime_proxy_websocket_response_inspection_policy(path, Enforce),
+                Some(("enforce", Some(426)))
+            );
+        }
     }
 }

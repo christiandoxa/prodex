@@ -1108,6 +1108,54 @@ def prodex_runtime_proxy_path_plan_v1(
     return RUNTIME_PROXY_REQUEST_OK
 
 
+@export("prodex_runtime_proxy_path_plan_v2")
+def prodex_runtime_proxy_path_plan_v2(
+    abi_version: Int64,
+    path_address: UInt,
+    path_length: Int64,
+    websocket: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 2:
+        return RUNTIME_PROXY_REQUEST_INVALID
+    var status = prodex_runtime_proxy_path_plan_v1(
+        1, path_address, path_length, websocket, output_address
+    )
+    if status != RUNTIME_PROXY_REQUEST_OK:
+        return status
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=11] = 0
+    var source = rich_view_ptr(ProdexRichStringView(path_address, UInt(path_length)))
+    comptime HTTP_ONLY_PREFIX = StringSlice("/_prodex/http")
+    var prefix_length = Int64(HTTP_ONLY_PREFIX.byte_length())
+    var path_end = output[unsafe_offset=2]
+    if (
+        path_end <= prefix_length
+        or not runtime_proxy_path_prefix(source, path_end, HTTP_ONLY_PREFIX)
+        or source[unsafe_offset=prefix_length] != 47
+    ):
+        return RUNTIME_PROXY_REQUEST_OK
+
+    # Reuse v1 classification on the actual local mount, keeping the transport
+    # marker out of upstream paths and independent of other broker clients.
+    status = prodex_runtime_proxy_path_plan_v1(
+        1,
+        path_address + UInt(prefix_length),
+        path_length - prefix_length,
+        websocket,
+        output_address,
+    )
+    if status != RUNTIME_PROXY_REQUEST_OK:
+        return status
+    for index in range(1, 4):
+        if output[unsafe_offset=index] >= 0:
+            output[unsafe_offset=index] += prefix_length
+    output[unsafe_offset=11] = prefix_length
+    return RUNTIME_PROXY_REQUEST_OK
+
+
 comptime RUNTIME_PROVIDER_ROUTE_RESPONSES: Int64 = 0
 comptime RUNTIME_PROVIDER_ROUTE_RESPONSES_COMPACT: Int64 = 1
 comptime RUNTIME_PROVIDER_ROUTE_CHAT_COMPLETIONS: Int64 = 2

@@ -4,8 +4,6 @@ use runtime_proxy_crate as runtime_proxy;
 use std::ffi::OsString;
 use std::net::SocketAddr;
 
-const PRODEX_GOVERNED_HTTP_PROVIDER_ID: &str = "prodex-openai-governed-http";
-
 pub fn runtime_proxy_codex_passthrough_args(
     runtime_proxy: Option<RuntimeProxyCodexEndpoint<'_>>,
     user_args: &[OsString],
@@ -52,7 +50,7 @@ fn runtime_proxy_governed_http_codex_args(
         listen_addr,
         openai_mount_path,
         user_args,
-        /*supports_websockets*/ false,
+        /*force_http_responses*/ true,
     )
 }
 
@@ -117,7 +115,7 @@ pub fn runtime_proxy_codex_args_with_mount_path(
         listen_addr,
         openai_mount_path,
         user_args,
-        /*supports_websockets*/ true,
+        /*force_http_responses*/ false,
     )
 }
 
@@ -125,43 +123,41 @@ fn runtime_proxy_openai_provider_codex_args(
     listen_addr: SocketAddr,
     openai_mount_path: &str,
     user_args: &[OsString],
-    supports_websockets: bool,
+    force_http_responses: bool,
 ) -> Vec<OsString> {
-    // Keep Codex 0.156 account/read bootstrap HTTPS; proxy only model traffic here.
-    let mut args = scope_codex_exec_config_args(user_args);
+    // Keep the native OpenAI identity for resume and its HTTPS account bootstrap.
+    // The local mount controls Responses transport while retaining that identity.
+    let args = scope_codex_exec_config_args(user_args);
+    let transport_prefix = if force_http_responses {
+        runtime_proxy::RUNTIME_PROXY_HTTP_ONLY_PREFIX
+    } else {
+        ""
+    };
     let proxy_openai_base = format!(
-        "http://{listen_addr}{}",
+        "http://{listen_addr}{transport_prefix}{}",
         normalize_mount_path(openai_mount_path)
     );
     let overrides = [
-        format!(
-            "model_provider={}",
-            toml_string_literal(PRODEX_GOVERNED_HTTP_PROVIDER_ID)
-        ),
-        format!(
-            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.name={}",
-            toml_string_literal("OpenAI through Prodex governance")
-        ),
-        format!(
-            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.base_url={}",
-            toml_string_literal(&proxy_openai_base)
-        ),
-        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.wire_api=\"responses\""),
-        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.requires_openai_auth=true"),
-        format!(
-            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.supports_websockets={supports_websockets}"
-        ),
-        format!(
-            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.supports_standalone_web_search=true"
+        ("model_provider".to_string(), toml_string_literal("openai")),
+        (
+            "openai_base_url".to_string(),
+            toml_string_literal(&proxy_openai_base),
         ),
     ];
-    let insert_at = governed_http_config_insertion_index(&args);
-    args.splice(
-        insert_at..insert_at,
-        overrides
-            .into_iter()
-            .flat_map(|value| [OsString::from("-c"), OsString::from(value)]),
-    );
+    // Rewrite scoped overrides in place so resume flags retain the governed endpoint.
+    let (mut args, replaced) = rewrite_codex_config_overrides(&args, &overrides);
+    for (index, (key, value)) in overrides.iter().enumerate() {
+        if !replaced[index] {
+            let insert_at = governed_http_config_insertion_index(&args);
+            args.splice(
+                insert_at..insert_at,
+                [
+                    OsString::from("-c"),
+                    OsString::from(format!("{key}={value}")),
+                ],
+            );
+        }
+    }
     args
 }
 

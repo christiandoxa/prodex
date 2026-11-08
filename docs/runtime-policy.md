@@ -572,6 +572,27 @@ Codex writes it through normal model selection; `ultra` remains an advanced
 conversation setting, and `plan_mode_reasoning_effort` is stored separately.
 Reading a preference does not advance its revision.
 
+OpenAI runtime launches keep Codex's built-in `openai` provider identity and
+route inference through `openai_base_url` at the local proxy. Codex's
+`chatgpt_base_url` controls account discovery through the configured upstream
+proxy. Responses launches that require HTTP use a transport-local mount whose
+WebSocket upgrade receives HTTP 426, allowing native Codex to select HTTP.
+
+Before a local launch, Prodex upgrades the reserved historical
+`prodex-openai-governed-http` session identity to `openai`. The transaction
+changes the rollout's `session_meta.payload.model_provider` value and the
+matching SQLite index identity. It uses shared session maintenance and native
+publication locks, a private `.prodex-provider-identity-bak` snapshot, atomic
+rollout replacement, and compare-and-swap index updates.
+
+Each launch attempts at most 32 repairs and prioritizes an explicit resume
+UUID. Candidate discovery uses the native provider index. While native backfill
+is incomplete, a fallback examines at most 512 active directory entries.
+Discovery and repair check a two-second budget between operations, and each
+transaction has a 64 MiB size limit. Busy sessions, oversized files, and
+conflicting provider backups defer repair with a launch diagnostic. A large
+unindexed home can need another launch after native backfill completes.
+
 Normal interactive launch and shutdown do not start an auxiliary `app-server`
 and do not paginate historical threads. Prodex keeps the normal path bounded to
 the exact resumed rollout, or the newest active rollout in the current/recent

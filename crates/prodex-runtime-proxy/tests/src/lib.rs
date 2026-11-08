@@ -87,6 +87,40 @@ fn normalizes_prodex_openai_mount_paths() {
 }
 
 #[test]
+fn http_only_launch_mount_is_local_and_preserves_runtime_route_classification() {
+    for mount in ["/backend-api/prodex", "/backend-api/prodex/v0.2.99"] {
+        let path = format!("/_prodex/http{mount}/responses?trace=1");
+        assert!(is_runtime_responses_path(&path));
+        assert_eq!(
+            runtime_proxy_request_lane(&path, false),
+            RuntimeRouteKind::Responses
+        );
+        assert_eq!(
+            runtime_proxy_normalize_openai_path(&path).as_ref(),
+            "/backend-api/codex/responses?trace=1"
+        );
+        let compact = format!("/_prodex/http{mount}/responses/compact?trace=1");
+        assert!(is_runtime_compact_path(&compact));
+        assert_eq!(
+            runtime_proxy_normalize_openai_path(&compact).as_ref(),
+            "/backend-api/codex/responses/compact?trace=1"
+        );
+    }
+    assert_eq!(
+        runtime_proxy_normalize_openai_path("/_prodex/http/v1/models?x=1").as_ref(),
+        "/v1/models?x=1"
+    );
+    for path in [
+        "/_prodex/http-extra/backend-api/prodex/responses",
+        "/_prodex/http",
+        "/_prodex/http?redirect=/backend-api/prodex/responses",
+        "/backend-api/codex/responses?redirect=/_prodex/http",
+    ] {
+        assert_eq!(runtime_proxy_normalize_openai_path(path).as_ref(), path);
+    }
+}
+
+#[test]
 fn classifies_realtime_v3_live_paths() {
     assert!(is_runtime_realtime_call_path("/v1/live"));
     assert!(is_runtime_realtime_websocket_path("/v1/live"));

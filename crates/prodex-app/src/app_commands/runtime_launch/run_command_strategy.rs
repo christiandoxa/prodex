@@ -220,7 +220,15 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
-        if let Some(path) = repair_resume_session_in_home(&prepared.codex_home, &self.codex_args)?
+        let resume_path = repair_resume_session_in_home(&prepared.codex_home, &self.codex_args)?;
+        if !self.dry_run {
+            super::resume_repair::migrate_legacy_openai_sessions_for_launch(
+                prepared,
+                &self.codex_args,
+                resume_path.as_deref(),
+            )?;
+        }
+        if let Some(path) = resume_path
             && path.starts_with(&prepared.paths.shared_codex_root)
         {
             self.resume_session_path = Some(path);

@@ -82,6 +82,8 @@ pub fn runtime_provider_models_response_plan(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeProxyPathPlan {
+    /// Bytes occupied by the optional transport-local HTTP-only prefix.
+    pub http_only_prefix_len: usize,
     pub mount_suffix_start: Option<usize>,
     pub path_end: usize,
     pub query_mark: Option<usize>,
@@ -304,10 +306,10 @@ pub fn runtime_proxy_path_plan(
 ) -> Result<RuntimeProxyPathPlan, MojoError> {
     ensure_rich_abi()?;
     let path_length = i64::try_from(path_and_query.len()).map_err(|_| MojoError::InvalidInput)?;
-    let mut output = [-1_i64; 11];
+    let mut output = [-1_i64; 12];
     let status = unsafe {
-        prodex_runtime_proxy_path_plan_v1(
-            1,
+        prodex_runtime_proxy_path_plan_v2(
+            2,
             path_and_query.as_ptr() as usize as u64,
             path_length,
             i64::from(websocket),
@@ -331,7 +333,12 @@ pub fn runtime_proxy_path_plan(
     if !(0..=3).contains(&output[9]) {
         return Err(MojoError::InvalidOutput);
     }
+    let http_only_prefix_len = usize::try_from(output[11]).map_err(|_| MojoError::InvalidOutput)?;
+    if http_only_prefix_len > path_end || !path_and_query.is_char_boundary(http_only_prefix_len) {
+        return Err(MojoError::InvalidOutput);
+    }
     Ok(RuntimeProxyPathPlan {
+        http_only_prefix_len,
         mount_suffix_start,
         path_end,
         query_mark,
@@ -343,4 +350,51 @@ pub fn runtime_proxy_path_plan(
         route_kind: output[9],
         long_lived: runtime_proxy_bool_output(output[10])?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_proxy_transport_path_plan_rejects_invalid_abi_inputs() {
+        let path = b"/_prodex/http/backend-api/prodex/responses";
+        let mut output = [-1_i64; 12];
+        for (version, address, length, websocket, output_address) in [
+            (
+                1,
+                path.as_ptr() as u64,
+                path.len() as i64,
+                0,
+                output.as_mut_ptr(),
+            ),
+            (2, 0, path.len() as i64, 0, output.as_mut_ptr()),
+            (2, path.as_ptr() as u64, -1, 0, output.as_mut_ptr()),
+            (
+                2,
+                path.as_ptr() as u64,
+                path.len() as i64,
+                2,
+                output.as_mut_ptr(),
+            ),
+            (
+                2,
+                path.as_ptr() as u64,
+                path.len() as i64,
+                0,
+                std::ptr::null_mut(),
+            ),
+        ] {
+            let status = unsafe {
+                prodex_runtime_proxy_path_plan_v2(
+                    version,
+                    address,
+                    length,
+                    websocket,
+                    output_address,
+                )
+            };
+            assert_ne!(status, 0);
+        }
+    }
 }

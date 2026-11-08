@@ -74,6 +74,43 @@ pub(crate) fn repair_resume_session_for_launch(
     Ok(session_file)
 }
 
+pub(crate) fn migrate_legacy_openai_sessions_for_launch(
+    prepared: &super::PreparedRuntimeLaunch,
+    codex_args: &[OsString],
+    explicit_path: Option<&Path>,
+) -> Result<()> {
+    let views = codex_args
+        .iter()
+        .map(|arg| arg.to_str())
+        .collect::<Vec<_>>();
+    let transport = prodex_mojo_core::runtime_overlay_policy::transport_flags(&views)
+        .map_err(|error| anyhow::anyhow!("failed to inspect resume transport: {error:?}"))?;
+    if transport.remote {
+        return Ok(());
+    }
+    let root = if prepared.managed {
+        &prepared.paths.shared_codex_root
+    } else {
+        &prepared.codex_home
+    };
+    let mut target = explicit_path
+        .filter(|path| path.starts_with(root))
+        .map(Path::to_path_buf);
+    if target.is_none()
+        && let Some(id) = prodex_runtime_launch::codex_resume_session_id(codex_args)
+    {
+        target = prodex_session_store::find_resume_session_path(root, id)?;
+    }
+    let report = prodex_shared_codex_fs::migrate_legacy_openai_provider(root, target.as_deref())?;
+    if report.deferred > 0 {
+        crate::print_launch_status(&format!(
+            "provider compatibility repair deferred for {} saved session(s); retry this launch when sessions are idle",
+            report.deferred
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn repair_super_resume_session_metadata(args: &prodex_cli::SuperArgs) -> Result<()> {
     let normalized = prodex_runtime_launch::normalize_run_codex_args(&args.codex_args);
     let picker_args = [OsString::from("resume")];

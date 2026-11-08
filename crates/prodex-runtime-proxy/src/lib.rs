@@ -78,6 +78,7 @@ pub use self::websocket_tcp_connect_executor::*;
 
 pub const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
 pub const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
+pub const RUNTIME_PROXY_HTTP_ONLY_PREFIX: &str = "/_prodex/http";
 pub const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
 pub const RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
@@ -190,7 +191,11 @@ pub fn runtime_proxy_normalize_openai_path(path_and_query: &str) -> Cow<'_, str>
     let plan = prodex_mojo_core::rich::runtime_proxy_path_plan(path_and_query, false)
         .expect("Mojo runtime proxy path planning returned invalid output");
     let Some(suffix_start) = plan.mount_suffix_start else {
-        return Cow::Borrowed(path_and_query);
+        return Cow::Borrowed(
+            path_and_query
+                .get(plan.http_only_prefix_len..)
+                .expect("validated Mojo runtime transport prefix"),
+        );
     };
 
     let mut normalized =
