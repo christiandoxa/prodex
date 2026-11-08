@@ -4,6 +4,7 @@ use prodex_mojo_core::launch_config::{
 use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 const LOCAL_PROXY_BYPASS_ENV_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
@@ -222,19 +223,28 @@ fn local_proxy_bypass_hosts_from_args(args: &[OsString], local_provider_id: &str
         local_provider_key.as_str(),
     ] {
         if let Some(base_url) = codex_config::codex_cli_config_override_value(args, key) {
-            push_proxy_bypass_url_hosts(&mut hosts, &base_url);
+            push_proxy_bypass_url_hosts(&mut hosts, &base_url, key == local_provider_key.as_str());
         }
     }
     hosts
 }
 
-fn push_proxy_bypass_url_hosts(parts: &mut Vec<String>, base_url: &str) {
+fn push_proxy_bypass_url_hosts(parts: &mut Vec<String>, base_url: &str, allow_non_loopback: bool) {
     let Ok(parsed) = reqwest::Url::parse(base_url) else {
         return;
     };
     let Some(host) = parsed.host_str() else {
         return;
     };
+    let host = host.trim_matches(['[', ']']);
+    let is_loopback = host == "localhost"
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback());
+    // External backend overrides must retain the caller's upstream proxy routing.
+    if !allow_non_loopback && !is_loopback {
+        return;
+    }
     parts.push(host.to_string());
     if let Some(port) = parsed.port() {
         let host_port = if host.contains(':') {

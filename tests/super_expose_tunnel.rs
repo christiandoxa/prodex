@@ -28,7 +28,7 @@ use temp_dir::TestDir;
 #[cfg(unix)]
 const TUNNEL_ID: &str = "tunnel_0123456789abcdef0123456789abcdef";
 #[cfg(unix)]
-const LATEST_VERSION_LINE: &str = "0.0.15+a390c168ff1b2d14e73a95991c186c6aba3ff5a0 (git sha: a390c168ff1b2d14e73a95991c186c6aba3ff5a0)";
+const LATEST_VERSION_LINE: &str = "0.0.20+c2144b0904980bcbae2636cdca4f4167e9818e0b (git sha: c2144b0904980bcbae2636cdca4f4167e9818e0b)";
 
 #[cfg(unix)]
 fn fake_tunnel_client(root: &TestDir, version_line: &str) -> std::path::PathBuf {

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 const OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION: &str = "0.0.13";
-const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.19";
+const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.20";
 const OPENAI_TUNNEL_CLIENT_RELEASE_URL: &str =
     "https://github.com/openai/tunnel-client/releases/latest";
 const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {
@@ -341,6 +341,8 @@ fn remove_inherited_tunnel_configuration(command: &mut Command) {
         "MCP_COMMAND",
         // This wrapper selects HTTP; unrelated stdio policies must not affect it.
         "MCP_STDIO_FAILURE_POLICY",
+        // Keep ambient OAuth forwarding permissions out of the managed tunnel.
+        "HARPOON_OAUTH_FORWARD_ORIGINS",
         "HEALTH_LISTEN_ADDR",
         "HEALTH_UNIX_SOCKET",
         "HEALTH_URL_FILE",
@@ -609,8 +611,12 @@ mod version_policy_tests {
                 "0.0.19",
             ),
             (
-                "0.0.20+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+                "0.0.20+c2144b0904980bcbae2636cdca4f4167e9818e0b (git sha: c2144b0904980bcbae2636cdca4f4167e9818e0b)",
                 "0.0.20",
+            ),
+            (
+                "0.0.21+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+                "0.0.21",
             ),
         ] {
             assert_eq!(
@@ -653,19 +659,27 @@ mod version_policy_tests {
     }
 
     #[test]
-    fn http_tunnel_child_does_not_inherit_stdio_failure_policy() {
+    fn http_tunnel_child_does_not_inherit_other_transport_configuration() {
         let mut command = Command::new("tunnel-client-not-launched");
-        command.env("MCP_STDIO_FAILURE_POLICY", "unrelated-stdio-policy");
+        let variables = [
+            ("MCP_STDIO_FAILURE_POLICY", "unrelated-stdio-policy"),
+            ("HARPOON_OAUTH_FORWARD_ORIGINS", "https://auth.example.com"),
+        ];
+        for (variable, value) in variables {
+            command.env(variable, value);
+        }
         command.env("PATH", "synthetic-search-path");
         remove_inherited_tunnel_configuration(&mut command);
         let overrides = command
             .get_envs()
             .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(
-            overrides.get(std::ffi::OsStr::new("MCP_STDIO_FAILURE_POLICY")),
-            Some(&None),
-            "the HTTP tunnel must not inherit another client's stdio recovery policy",
-        );
+        for (variable, _) in variables {
+            assert_eq!(
+                overrides.get(std::ffi::OsStr::new(variable)),
+                Some(&None),
+                "the HTTP tunnel must isolate inherited {variable}",
+            );
+        }
         assert_eq!(
             overrides.get(std::ffi::OsStr::new("PATH")),
             Some(&Some(std::ffi::OsStr::new("synthetic-search-path"))),

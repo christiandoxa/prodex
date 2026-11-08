@@ -1228,7 +1228,10 @@ localhost
 ::1
 ```
 
-This prevents a user proxy from intercepting the local runtime proxy.
+This keeps the local runtime connection direct. Automatic bypass entries inferred
+from Codex backend URL overrides are limited to loopback hosts. External backend
+origins use the upstream proxy settings inherited from the shell. Prodex merges
+explicit local-provider hosts with user-supplied `NO_PROXY` entries.
 
 Use `--no-proxy` on `prodex run` or `prodex super` when you want Prodex upstream requests to bypass proxy settings.
 

@@ -391,6 +391,112 @@ fn codex_child_plan_adds_local_provider_host_to_proxy_bypass_env() {
 }
 
 #[test]
+fn codex_child_plan_keeps_external_builtin_endpoints_on_inherited_proxy() {
+    let inherited = environment(&[
+        ("NO_PROXY", "retained.example.com"),
+        ("no_proxy", "internal.example.com"),
+        ("HTTP_PROXY", "http://127.0.0.1:1086"),
+        ("HTTPS_PROXY", "http://127.0.0.1:1086"),
+        ("http_proxy", "http://127.0.0.1:1086"),
+        ("https_proxy", "http://127.0.0.1:1086"),
+    ]);
+    for (key, base_url) in [
+        (
+            "chatgpt_base_url",
+            "https://routing.example.com/backend-api",
+        ),
+        ("openai_base_url", "https://api.example.com:8443/v1"),
+        (
+            "chatgpt_base_url",
+            "http://localhost.example.com/backend-api",
+        ),
+        ("openai_base_url", "http://192.0.2.1:8080/v1"),
+        ("chatgpt_base_url", "http://[2001:db8::1]:8080/backend-api"),
+        ("openai_base_url", "https://retained.example.com/v1"),
+        (
+            "model_providers.prodex-openai-governed-http.base_url",
+            "https://routing.example.com/backend-api",
+        ),
+    ] {
+        let plan = codex_child_plan_with_env(
+            OsString::from("codex"),
+            PathBuf::from("/tmp/prodex-codex-home"),
+            vec![
+                OsString::from("-c"),
+                OsString::from(format!("{key}=\"{base_url}\"")),
+            ],
+            "prodex-local",
+            &inherited,
+        );
+        let bypass = plan
+            .extra_env
+            .iter()
+            .filter(|(key, _)| key == "NO_PROXY" || key == "no_proxy")
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            bypass,
+            environment(&[
+                (
+                    "NO_PROXY",
+                    "retained.example.com,internal.example.com,127.0.0.1,localhost,::1",
+                ),
+                (
+                    "no_proxy",
+                    "retained.example.com,internal.example.com,127.0.0.1,localhost,::1",
+                ),
+            ]),
+            "{key}={base_url}"
+        );
+        for proxy_key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+            assert!(!plan.removed_env.iter().any(|key| key == proxy_key));
+            assert!(!plan.extra_env.iter().any(|(key, _)| key == proxy_key));
+        }
+    }
+}
+
+#[test]
+fn codex_child_plan_bypasses_loopback_endpoints_with_valid_ipv6_ports() {
+    for key in [
+        "chatgpt_base_url",
+        "openai_base_url",
+        "model_providers.prodex-openai-governed-http.base_url",
+        "model_providers.prodex-local.base_url",
+    ] {
+        for (base_url, added) in [
+            ("http://localhost:64551/backend-api", "localhost:64551"),
+            (
+                "http://127.0.0.2:64551/backend-api",
+                "127.0.0.2,127.0.0.2:64551",
+            ),
+            ("http://[::1]:64551/backend-api", "[::1]:64551"),
+            ("http://[0:0:0:0:0:0:0:1]:64551/backend-api", "[::1]:64551"),
+        ] {
+            let plan = codex_child_plan_with_env(
+                OsString::from("codex"),
+                PathBuf::from("/tmp/prodex-codex-home"),
+                vec![
+                    OsString::from("-c"),
+                    OsString::from(format!("{key}=\"{base_url}\"")),
+                ],
+                "prodex-local",
+                &[],
+            );
+            for bypass_key in ["NO_PROXY", "no_proxy"] {
+                assert_eq!(
+                    plan.extra_env
+                        .iter()
+                        .find(|(key, _)| key == bypass_key)
+                        .map(|(_, value)| value.to_string_lossy().into_owned()),
+                    Some(format!("127.0.0.1,localhost,::1,{added}")),
+                    "{key}={base_url} {bypass_key}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn codex_child_plan_adds_runtime_proxy_ports_to_proxy_bypass_env() {
     let args = vec![
         OsString::from("-c"),
