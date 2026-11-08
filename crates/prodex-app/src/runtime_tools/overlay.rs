@@ -369,6 +369,12 @@ fn project_fresh_super_config(
         ]);
     }
     configure_overlay_codex_home(overlay_home, &config_args, strategy.args.full_access)?;
+    if strategy.model_provider_override.as_deref() == Some(prodex_cli::SUPER_LOCAL_PROVIDER_ID) {
+        // A trusted project may be the user's home and contain the original .codex/config.toml.
+        // Moving explicit local choices only to user config lets that project override them.
+        // Keep their command-line precedence in both the TUI and its owned app-server.
+        projected_args.extend(config_args);
+    }
     *runtime_args = projected_args;
     Ok(())
 }
@@ -528,7 +534,8 @@ fn prepare_overlay_launch(
             marker,
         )?;
     }
-    if !prodex_runtime_launch::is_codex_exec_invocation(&runtime_args)
+    if strategy.model_provider_override.as_deref() != Some(prodex_cli::SUPER_LOCAL_PROVIDER_ID)
+        && !prodex_runtime_launch::is_codex_exec_invocation(&runtime_args)
         && !prodex_runtime_launch::codex_resume_requested(&runtime_args)
     {
         crate::project_in_app_resume_model_settings(

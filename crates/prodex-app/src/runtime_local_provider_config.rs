@@ -69,6 +69,40 @@ fn local_provider_catalog_codex_args(
         SUPER_DEFAULT_AUTO_COMPACT_LIMIT as u64,
     )?
     .min(context_window.saturating_sub(1));
+    let mut local_args = user_args.to_vec();
+    if prodex_mojo_core::json::local_model_uses_chat_completions(&model)
+        .map_err(|error| anyhow::anyhow!("local model protocol selection failed: {error:?}"))?
+    {
+        let catalog =
+            render_local_runtime_model_catalog(&model, context_window, auto_compact_token_limit)?;
+        let supported = catalog["supported_reasoning_levels"]
+            .as_array()
+            .context("local model catalog has no reasoning levels")?;
+        let supports = |value: &str| {
+            supported
+                .iter()
+                .any(|level| level["effort"].as_str() == Some(value))
+        };
+        let explicit = codex_cli_config_override_value(user_args, "model_reasoning_effort");
+        if let Some(effort) = explicit.as_deref() {
+            anyhow::ensure!(
+                supports(effort),
+                "local model reasoning effort is unsupported; use low, medium, or xhigh"
+            );
+        } else {
+            let inherited =
+                codex_effective_config_value(codex_home, user_args, "model_reasoning_effort")?;
+            let effort = inherited
+                .as_deref()
+                .filter(|effort| supports(effort))
+                .or_else(|| catalog["default_reasoning_level"].as_str())
+                .context("local model catalog has no default reasoning level")?;
+            local_args.extend([
+                "-c".into(),
+                format!("model_reasoning_effort={}", toml_string_literal(effort)).into(),
+            ]);
+        }
+    }
     let catalog_path = codex_home.join(LOCAL_MODEL_CATALOG_FILE);
     if write_catalog {
         write_local_model_catalog(
@@ -85,7 +119,7 @@ fn local_provider_catalog_codex_args(
         "model_catalog_json={}",
         toml_string_literal(&catalog_path.to_string_lossy())
     )));
-    args.extend(user_args.iter().cloned());
+    args.extend(local_args);
     Ok(args)
 }
 
@@ -116,7 +150,15 @@ fn local_u64_config_for_launch(
     key: &str,
     default_value: u64,
 ) -> Result<u64> {
-    let Some(value) = codex_effective_config_exact_value(codex_home, user_args, key)? else {
+    // The exact accessor preserves quoted whitespace for validation, but intentionally
+    // returns only TOML strings. CLI context budgets are unquoted integer literals.
+    let cli_value = codex_config::codex_cli_config_override_exact_value(user_args, key)
+        .or_else(|| codex_cli_config_override_value(user_args, key));
+    let value = match cli_value {
+        Some(value) => Some(value),
+        None => codex_effective_config_exact_value(codex_home, user_args, key)?,
+    };
+    let Some(value) = value else {
         return Ok(default_value);
     };
     parse_catalog_u64("local provider", key, &value)
@@ -148,6 +190,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     include!("runtime_local_provider_config/catalog_tests.rs");
+    include!("runtime_local_provider_config/offrail_tests.rs");
 
     fn temp_codex_home(name: &str) -> PathBuf {
         let stamp = SystemTime::now()

@@ -232,3 +232,58 @@ fn saved_session_marker_records_fresh_super_without_enabling_auto_rotate() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn explicit_local_super_configuration_keeps_cli_precedence_in_owned_server() {
+    let root = temp_overlay("local-cli-precedence");
+    std::fs::create_dir_all(&root).unwrap();
+    let state_home = root.join("state");
+    let _home = crate::TestEnvVarGuard::set("PRODEX_HOME", state_home.to_str().unwrap());
+    let shared_home = root.join("shared");
+    let _shared =
+        crate::TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared_home.to_str().unwrap());
+    std::fs::write(
+        root.join("config.toml"),
+        "model=\"gpt-5.6-luna\"\nmodel_reasoning_effort=\"max\"\n",
+    )
+    .unwrap();
+    let crate::Commands::Super(args) = crate::parse_cli_command_from([
+        "prodex",
+        "s",
+        "--url",
+        "http://127.0.0.1:8899",
+        "--model",
+        "offrail-27b",
+        "--context-window",
+        "118272",
+        "--auto-compact-token-limit",
+        "100000",
+    ])
+    .unwrap() else {
+        panic!("expected Super");
+    };
+    let args = args.into_runtime_tool_args_with_presidio(false).unwrap();
+    let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(args, None).unwrap();
+    let mut runtime =
+        crate::prepare_local_provider_catalog_codex_args(&root, &strategy.codex_args).unwrap();
+    project_fresh_super_config(&strategy, &root, &mut runtime).unwrap();
+    let server = super::super::project_app_server_config_args(&runtime, false);
+    for (key, expected) in [
+        ("model", "offrail-27b"),
+        ("model_provider", "prodex-local"),
+        ("model_context_window", "118272"),
+        ("model_auto_compact_token_limit", "100000"),
+        ("model_reasoning_effort", "medium"),
+    ] {
+        assert_eq!(
+            crate::codex_cli_config_override_value(&runtime, key).as_deref(),
+            Some(expected)
+        );
+        assert_eq!(
+            crate::codex_cli_config_override_value(&server, key).as_deref(),
+            Some(expected)
+        );
+    }
+    assert!(crate::codex_cli_config_override_value(&server, "model_catalog_json").is_some());
+    std::fs::remove_dir_all(root).unwrap();
+}

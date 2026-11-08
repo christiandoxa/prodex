@@ -27,8 +27,9 @@ pub use bridge::{
     provider_core_chat_compatible_responses_value_from_chat_value_with_fallback_ids,
     provider_core_chat_compatible_rtk_wrapped_tool_arguments,
     provider_core_chat_compatible_tool_call_thought_signature,
-    provider_core_chat_compatible_validate_top_level_request_shape, provider_core_lossless_body,
-    provider_core_rewritten_body, provider_core_rewritten_json_value,
+    provider_core_chat_compatible_validate_top_level_request_shape,
+    provider_core_local_chat_parallel_control, provider_core_local_chat_system_messages,
+    provider_core_lossless_body, provider_core_rewritten_body, provider_core_rewritten_json_value,
     provider_core_split_flat_namespace_tool_name,
 };
 pub use catalog::{

@@ -98,6 +98,27 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
         ))
     .then(|| shared.provider.bridge_kind());
     match responses_provider {
+        Some(RuntimeProviderBridgeKind::OpenAiResponses) if chat_compatible_request.is_some() => {
+            respond_runtime_chat_compatible_rewrite(
+                request_id,
+                request,
+                response,
+                RuntimeChatCompatibleRewriteContext {
+                    status,
+                    content_type: &content_type,
+                    upstream_headers: upstream_headers.clone(),
+                    prefix,
+                    shared,
+                    captured,
+                    provider_kind: RuntimeProviderBridgeKind::OpenAiResponses,
+                    profile_name: None,
+                    binding_recorder: None,
+                    pending_request: chat_compatible_request.take().unwrap_or_default(),
+                    response_governance,
+                },
+            );
+            return;
+        }
         Some(
             provider_kind @ (RuntimeProviderBridgeKind::DeepSeek
             | RuntimeProviderBridgeKind::Anthropic),

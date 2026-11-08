@@ -27,6 +27,7 @@ mod local_rewrite_gemini_models;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_gemini_thought_signatures;
 mod local_rewrite_kiro;
+mod local_rewrite_local_chat;
 mod local_rewrite_model_memory;
 mod local_rewrite_options;
 mod local_rewrite_pipeline;

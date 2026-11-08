@@ -11,6 +11,7 @@ use std::time::Duration;
 mod binding_continuity;
 mod deepseek;
 mod deepseek_history;
+mod local_chat;
 mod model_memory;
 mod provider_routes;
 mod support;
@@ -2126,64 +2127,6 @@ fn copilot_transport_uses_copilot_api_headers_for_chat_completions() {
             .get_version_num(),
         7
     );
-    assert_eq!(
-        header("traceparent"),
-        Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
-    );
-    assert_eq!(header("tracestate"), Some("prodex=test"));
-    assert_eq!(header("baggage"), Some("tenant_tier=premium"));
-}
-
-#[test]
-fn openai_compatible_transport_preserves_trace_context_for_chat_completions() {
-    let root = temp_root("openai-compatible-trace-context");
-    let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start();
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("http://{}/v1", upstream.addr),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: vec!["upstream-key".to_string()],
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-    })
-    .expect("OpenAI-compatible local rewrite proxy should start");
-
-    let response = reqwest::blocking::Client::new()
-        .post(format!("http://{}/v1/chat/completions", proxy.listen_addr))
-        .header(reqwest::header::USER_AGENT, "codex-cli/0.1-test")
-        .header("authorization", "Bearer caller-token")
-        .header(
-            "traceparent",
-            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        )
-        .header("tracestate", "prodex=test")
-        .header("baggage", "tenant_tier=premium")
-        .json(&serde_json::json!({
-            "model": "gpt-5.4",
-            "stream": false,
-            "messages": [{"role": "user", "content": "trace me"}]
-        }))
-        .send()
-        .expect("OpenAI-compatible chat request should be sent");
-    assert_eq!(response.status().as_u16(), 200);
-
-    let headers = upstream
-        .headers_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("upstream should receive OpenAI-compatible headers");
-    let header = |name: &str| {
-        headers
-            .iter()
-            .find_map(|(key, value)| key.eq_ignore_ascii_case(name).then_some(value.as_str()))
-    };
-    assert_eq!(header("authorization"), Some("Bearer upstream-key"));
-    assert_eq!(header("user-agent"), Some("codex-cli/0.1-test"));
     assert_eq!(
         header("traceparent"),
         Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")

@@ -8,14 +8,14 @@ Use this path when you want the Prodex/Codex front end, Super mode, and local in
 
 `prodex super --url` routes Codex through Prodex's local Smart Context rewrite proxy to a local OpenAI-compatible server. It does not use quota preflight or account auto-rotate.
 
-The local server should provide:
+For generic model aliases, the local server should provide:
 
 - An OpenAI-compatible `/v1` base URL
 - `POST /v1/responses` support
 - Function-style tool definitions in the Responses API
 - A model/template that can emit parseable tool calls
 
-Codex CLI 0.124.0 and newer no longer supports the old `wire_api = "chat"` provider path. Servers that only implement `/v1/chat/completions` are not enough for `prodex super --url`.
+Codex CLI 0.124.0 and newer no longer supports the old `wire_api = "chat"` provider path. Generic model aliases still require Responses support. The qualified Offrail/Bonsai profile below uses a Prodex-owned Chat Completions adapter; Codex itself continues to use `wire_api = "responses"`.
 
 ## Quick Command
 
@@ -38,6 +38,47 @@ Override it when your server exposes a different alias:
 ```bash
 prodex super --url http://127.0.0.1:8131 --model local/my-model
 ```
+
+## Offrail / Bonsai gaming-GPU launcher
+
+For the `offrail-27b` and `bonsai-2-27b` aliases published by
+[local-ai-on-your-gaming-gpu](https://github.com/sudoingX/local-ai-on-your-gaming-gpu),
+Prodex selects the local Chat Completions compatibility profile automatically:
+
+```bash
+prodex s \
+  --url http://127.0.0.1:8899 \
+  --model offrail-27b \
+  --context-window 118272 \
+  --auto-compact-token-limit 100000
+```
+
+Use the context size actually configured on your server; the example is not a
+hardware-independent context recommendation. An explicit model and numeric
+context/compaction budgets outrank inherited configuration, including a trusted
+project located at the user's home. You do not need to reselect the model in
+`/model`. Global configuration is not rewritten.
+
+This template supports `low`, `medium`, and `xhigh`. The default is `medium`;
+unsupported inherited global effort is replaced with that default. An explicit
+supported `-c model_reasoning_effort='"xhigh"'` is retained. Explicit `high` or
+`max` fails with a supported-effort diagnostic before inference. Invalid effort
+arriving through the local proxy returns HTTP 400, not a retryable overload.
+
+The adapter calls `/v1/chat/completions` and converts function-call streams back
+to Responses events. It translates freeform `apply_patch` and namespaced MCP
+schemas/results rather than dropping them. Tools are advertised eagerly instead
+of depending on unsupported Responses `tool_search`. Trusted system/developer
+instruction fragments are combined into one initial system message for the
+strict template; user, assistant, and tool-result ordering remains unchanged.
+Local upstream requests do not inherit cloud account authorization headers.
+Native `/compact` uses the same adapter, preserving history and the backend's
+parallel-tool control before continuing the conversation.
+
+RTK, Codebase Memory MCP, Playwright MCP, and Ponytail retain Super's automatic
+activation. Presidio still asks for consent. Missing/incompatible external tools
+retain their existing launch diagnostics. Other local model aliases and cloud
+providers keep their existing protocol behavior.
 
 ## Example: llama.cpp Server
 

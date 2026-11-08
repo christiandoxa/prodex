@@ -292,3 +292,23 @@ fn compiled_local_schema_from_minimal_observations_keeps_fixed_metadata() {
     assert!(text.contains(r#""input_modalities":["text"]"#));
     assert!(text.contains(r#""context_window":0,"max_context_window":0,"auto_compact_token_limit":18446744073709551615"#));
 }
+
+#[test]
+fn local_model_protocol_classification_uses_validated_compiled_abi() {
+    for (model, expected) in [
+        ("offrail-27b", true),
+        ("bonsai-2-27b", true),
+        ("offrail-27b-custom", false),
+        ("", false),
+        ("雪", false),
+    ] {
+        assert_eq!(local_model_uses_chat_completions(model).unwrap(), expected);
+    }
+    // SAFETY: invalid pointer/length combinations are rejected before dereference.
+    unsafe {
+        assert_eq!(prodex_local_model_chat_protocol_v1(2, 0, 0), -1);
+        assert_eq!(prodex_local_model_chat_protocol_v1(1, 0, 1), -1);
+        assert_eq!(prodex_local_model_chat_protocol_v1(1, 0, -1), -1);
+        assert_eq!(prodex_local_model_chat_protocol_v1(1, 0, 0), 0);
+    }
+}

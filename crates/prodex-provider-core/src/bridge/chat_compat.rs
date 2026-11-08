@@ -1,5 +1,11 @@
 //! Chat-compatible response and request-shape bridge helpers.
 
+#[path = "chat_compat/local.rs"]
+mod local;
+pub use local::{
+    provider_core_local_chat_parallel_control, provider_core_local_chat_system_messages,
+};
+
 #[path = "chat_compat/response.rs"]
 mod response;
 #[path = "chat_compat/tool_calls.rs"]

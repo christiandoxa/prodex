@@ -4,9 +4,31 @@ from parsed_json import (
     pj_child, pj_next, pj_field, pj_kind, pj_text, pj_valid, pj_is, pj_literal, pj_trim,
 )
 from rich_types import ProdexRichStringView
-from rich_text import rich_view_matches_literal
+from rich_text import rich_view_matches_literal, rich_view_valid
 from json_sink import JsonSink, js_byte, js_literal, js_string, js_raw, js_raw_view, js_u64
 from kiro_model_catalog import kiro_catalog_positive_u64
+
+
+
+def runtime_local_chat_model(model: ProdexRichStringView) -> Bool:
+    # The published local-ai launcher aliases use a Qwen-family template and
+    # Chat Completions function tools, not the complete Responses tool protocol.
+    return (
+        rich_view_matches_literal["offrail-27b"](model, False)
+        or rich_view_matches_literal["bonsai-2-27b"](model, False)
+    )
+
+
+@export("prodex_local_model_chat_protocol_v1")
+def prodex_local_model_chat_protocol_v1(
+    abi: Int64, address: UInt, length: Int64,
+) abi("C") -> Int64:
+    if abi != 1 or length < 0 or (length > 0 and address == 0):
+        return -1
+    var model = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(model, 0x7FFFFFFFFFFFFFFF):
+        return -1
+    return Int64(runtime_local_chat_model(model))
 
 
 def runtime_reasoning_description(effort: ProdexRichStringView) -> ProdexRichStringView:
@@ -126,6 +148,7 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     if not deepseek and not kiro and not capable and not local:
         return False
     var slug = pj_field(tree, 0, StringSlice("slug"))
+    var local_chat = local and runtime_local_chat_model(pj_text(tree, slug))
     var display = pj_field(tree, 0, StringSlice("display_name"))
     var description = pj_field(tree, 0, StringSlice("description"))
     if pj_kind(tree, slug) != JSON_STRING or (not local and (pj_kind(tree, display) != JSON_STRING or pj_kind(tree, description) != JSON_STRING)):
@@ -162,12 +185,20 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     else:
         js_raw(sink, tree, description)
     js_literal(sink, StringSlice(',"default_reasoning_level":'))
-    if (deepseek and not deepseek_specific) or (gemini and not gemini_specific) or local or pj_kind(tree, default) == JSON_NULL or pj_is["unknown"](tree, default):
+    if local_chat:
+        js_literal(sink, StringSlice('"medium"'))
+    elif (deepseek and not deepseek_specific) or (gemini and not gemini_specific) or local or pj_kind(tree, default) == JSON_NULL or pj_is["unknown"](tree, default):
         js_literal(sink, StringSlice('"high"'))
     else:
         js_raw(sink, tree, default)
     js_literal(sink, StringSlice(',"supported_reasoning_levels":['))
-    if deepseek and not deepseek_specific:
+    if local_chat:
+        runtime_put_reasoning(sink, pj_literal(StringSlice("low")))
+        js_byte(sink, 44)
+        runtime_put_reasoning(sink, pj_literal(StringSlice("medium")))
+        js_byte(sink, 44)
+        runtime_put_reasoning(sink, pj_literal(StringSlice("xhigh")))
+    elif deepseek and not deepseek_specific:
         js_literal(sink, StringSlice(
             '{"effort":"low","description":"DeepSeek low reasoning effort"},'
             '{"effort":"medium","description":"DeepSeek medium reasoning effort"},'
@@ -242,7 +273,10 @@ def runtime_catalog_emit(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson,
     js_literal(sink, StringSlice(',"effective_context_window_percent":95,"experimental_supported_tools":[],"input_modalities":'))
     js_literal(sink, StringSlice('["text","image"]') if capable else StringSlice('["text"]'))
     js_literal(sink, StringSlice(',"supports_search_tool":'))
-    js_literal(sink, StringSlice("true") if local else capability)
+    if local_chat:
+        js_literal(sink, StringSlice("false"))
+    else:
+        js_literal(sink, StringSlice("true") if local else capability)
     js_byte(sink, 125)
     return True
 

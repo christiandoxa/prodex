@@ -2,6 +2,7 @@ use super::{JsonNode, transform_json};
 use crate::MojoError;
 
 unsafe extern "C" {
+    fn prodex_local_model_chat_protocol_v1(abi: i64, address: usize, length: i64) -> i64;
     fn prodex_mojo_runtime_model_catalog_v1(
         abi: i64,
         max_entries: i64,
@@ -44,3 +45,15 @@ pub fn runtime_dynamic_catalog_json(
 #[cfg(test)]
 #[path = "runtime_catalog_tests.rs"]
 mod tests;
+
+/// Whether a known local launcher model needs the Chat Completions tool adapter.
+/// Generic and cloud models retain their existing Responses behavior.
+pub fn local_model_uses_chat_completions(model: &str) -> Result<bool, MojoError> {
+    let length = i64::try_from(model.len()).map_err(|_| MojoError::InvalidInput)?;
+    // SAFETY: the UTF-8 string remains alive throughout the synchronous ABI call.
+    match unsafe { prodex_local_model_chat_protocol_v1(1, model.as_ptr() as usize, length) } {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}

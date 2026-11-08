@@ -1,8 +1,8 @@
 [
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 2517,
-    "reason": "Local rewrite cross-provider regression coverage is ratcheted after extracting Kiro binding-continuity coverage to a focused sibling test module."
+    "maxLines": 2460,
+    "reason": "Local rewrite cross-provider regression coverage is ratcheted after extracting Kiro binding-continuity coverage to a focused sibling test module. Local OpenAI protocol dispatch and trace-context coverage now live in focused local-chat siblings."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/deepseek.rs",
@@ -41,8 +41,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-    "maxLines": 1972,
-    "reason": "Upstream transport remains one audited I/O boundary after extracting binding-candidate policy, OpenAI retry gates, binding identity-source selection, and the test request-reader helper; cap tracks the exact reviewed LOC without restoring policy fallbacks."
+    "maxLines": 1967,
+    "reason": "Upstream transport remains one audited I/O boundary after extracting binding-candidate policy, OpenAI retry gates, binding identity-source selection, and the test request-reader helper; cap tracks the exact reviewed LOC without restoring policy fallbacks. Local OpenAI protocol dispatch and trace-context coverage now live in focused local-chat siblings."
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",

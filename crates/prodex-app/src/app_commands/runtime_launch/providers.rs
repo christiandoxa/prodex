@@ -159,6 +159,7 @@ pub(super) fn runtime_local_rewrite_provider_options(
         }
         Some(provider) => bail!("unsupported external provider '{provider}'"),
         None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            local: request.model_provider_override == Some(prodex_cli::SUPER_LOCAL_PROVIDER_ID),
             api_keys: Vec::new(),
         }),
     }

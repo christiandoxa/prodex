@@ -37,7 +37,7 @@ impl TestUpstream {
         Self::start_with_responses(vec![200; request_count], content_type, response_body)
     }
 
-    fn start_with_responses(
+    pub(super) fn start_with_responses(
         statuses: Vec<u16>,
         content_type: &'static str,
         response_body: &'static str,

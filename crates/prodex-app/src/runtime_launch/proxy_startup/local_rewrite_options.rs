@@ -17,6 +17,7 @@ pub(crate) enum RuntimeLocalRewriteProviderOptions {
     },
     OpenAiResponses {
         api_keys: Vec<String>,
+        local: bool,
     },
     DeepSeek {
         api_keys: Vec<String>,

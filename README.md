@@ -1107,6 +1107,8 @@ prodex super --url http://127.0.0.1:8131 --model local/qwen
 
 Use `--context-window` and `--auto-compact-token-limit` if your local server is configured with a larger context window.
 
+The `offrail-27b` and `bonsai-2-27b` aliases from the gaming-GPU launcher use an automatic Chat Completions tool adapter, with `medium` reasoning by default. Explicit model and context choices are preserved. See [the Offrail/Bonsai profile](./LOCAL.md#offrail--bonsai-gaming-gpu-launcher) for the complete command.
+
 See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 </details>

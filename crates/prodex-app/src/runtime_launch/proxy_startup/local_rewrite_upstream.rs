@@ -722,13 +722,8 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
             send_runtime_copilot_upstream_request(request_id, request, shared, body, auth, endpoint)
         }
         prodex_mojo_core::provider_upstream::ProviderDispatchKind::OpenAi => {
-            let RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys } =
-                shared.provider.as_ref()
-            else {
-                anyhow::bail!("application provider dispatch does not match configured adapter")
-            };
-            send_runtime_openai_upstream_request(
-                request_id, request, shared, body, api_keys, endpoint,
+            super::local_rewrite_local_chat::send_openai_or_local_request(
+                request_id, request, shared, body, endpoint,
             )
         }
         prodex_mojo_core::provider_upstream::ProviderDispatchKind::DeepSeek => {
@@ -772,7 +767,7 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         }
     }
 }
-fn send_runtime_openai_upstream_request(
+pub(super) fn send_runtime_openai_upstream_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,

@@ -21,6 +21,7 @@ fn rotation_is_observed_without_environment_reload() {
         state: &AppState::default(),
         upstream_base_url: format!("http://{}/v1", upstream.addr),
         provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            local: false,
             api_keys: Vec::new(),
         }
         .with_projected_credential(credential),

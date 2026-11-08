@@ -31,6 +31,7 @@ pub(super) use urls::{
 };
 
 pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
+    LocalChat,
     Anthropic {
         auth: &'a RuntimeAnthropicAuth,
         native_messages: bool,
@@ -65,7 +66,8 @@ impl RuntimeLocalRewritePreparedAuth<'_> {
                 RuntimeProviderBridgeKind::Anthropic
             }
             RuntimeLocalRewritePreparedAuth::Copilot { .. } => RuntimeProviderBridgeKind::Copilot,
-            RuntimeLocalRewritePreparedAuth::OpenAiResponses { .. } => {
+            RuntimeLocalRewritePreparedAuth::LocalChat
+            | RuntimeLocalRewritePreparedAuth::OpenAiResponses { .. } => {
                 RuntimeProviderBridgeKind::OpenAiResponses
             }
             RuntimeLocalRewritePreparedAuth::DeepSeek { .. } => RuntimeProviderBridgeKind::DeepSeek,
@@ -175,6 +177,11 @@ fn runtime_local_rewrite_apply_prepared_auth(
     auth: RuntimeLocalRewritePreparedAuth<'_>,
 ) -> Result<reqwest::RequestBuilder> {
     match auth {
+        RuntimeLocalRewritePreparedAuth::LocalChat => runtime_local_rewrite_copy_openai_headers(
+            request,
+            runtime_local_rewrite_provider_headers(upstream_request),
+            true,
+        ),
         RuntimeLocalRewritePreparedAuth::Anthropic {
             auth,
             native_messages,

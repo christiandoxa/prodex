@@ -150,7 +150,9 @@ mod runtime_catalog_plan;
 pub use self::kiro_catalog::{
     KiroModelCatalogModel, KiroModelCatalogPlan, kiro_model_catalog_plan,
 };
-pub use self::runtime_catalog::{runtime_dynamic_catalog_json, runtime_model_catalog_json};
+pub use self::runtime_catalog::{
+    local_model_uses_chat_completions, runtime_dynamic_catalog_json, runtime_model_catalog_json,
+};
 pub use self::runtime_catalog_plan::runtime_catalog_plan_json;
 mod log_token;
 pub use log_token::{LogTokenPresentation, log_token_presentation_json};

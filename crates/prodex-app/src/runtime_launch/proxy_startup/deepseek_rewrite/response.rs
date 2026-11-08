@@ -49,6 +49,9 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
     }
     let mut response = if let Some(mut response) = translated
         .as_ref()
+        // The local Chat adapter shares OpenAI transport, whose native Responses
+        // conformance result is passthrough, not a Chat-to-Responses conversion.
+        .filter(|_| provider_kind != RuntimeProviderBridgeKind::OpenAiResponses)
         .and_then(|result| provider_core_rewritten_json_value(Some(result)))
     {
         runtime_deepseek_apply_typed_fallback_ids(&value, &mut response);
