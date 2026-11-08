@@ -322,7 +322,8 @@ fn ensure_backup(
             if error.kind() == io::ErrorKind::AlreadyExists
                 || backup_path.try_exists().unwrap_or(false) =>
         {
-            let (backup, metadata) = open_regular_file(&backup_path, false)?;
+            // Windows FlushFileBuffers requires write access even for a retained snapshot.
+            let (backup, metadata) = open_regular_file(&backup_path, cfg!(windows))?;
             if exact_backup_suffix.is_some() {
                 anyhow::ensure!(
                     metadata.len() == contents.len() as u64,

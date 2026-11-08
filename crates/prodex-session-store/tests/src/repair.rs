@@ -310,6 +310,41 @@ fn repair_transaction_aborts_and_cleans_up_after_concurrent_append() {
 }
 
 #[test]
+fn repair_transaction_syncs_retained_backup_without_overwriting_it() {
+    let root = test_temp_dir("session-repair-retained-backup");
+    let sessions = root.join("sessions");
+    fs::create_dir_all(&sessions).expect("session directory should be created");
+    let path = sessions.join("retained.jsonl");
+    let backup = path.with_extension("jsonl.prodex-repair-bak");
+    let original_backup = b"{\"type\":\"event\",\"payload\":{\"message\":\"older snapshot\"}}\n";
+    let current = b"{\"type\":\"event\",\"payload\":{\"message\":\"current history\"}}\n";
+    let repaired = b"{\"type\":\"session_meta\"}\n";
+    fs::write(&path, current).expect("current session should be written");
+    fs::write(&backup, original_backup).expect("previous backup should be written");
+
+    let transaction = repair_transaction::SessionRepairTransaction::begin(
+        &root,
+        &path,
+        SESSION_STORE_FILE_MAX_BYTES,
+    )
+    .expect("repair transaction should start");
+    transaction
+        .commit(repaired)
+        .expect("retained backup should sync before committing repair");
+
+    assert_eq!(
+        fs::read(&path).expect("repaired session should read"),
+        repaired
+    );
+    assert_eq!(
+        fs::read(&backup).expect("retained backup should read"),
+        original_backup
+    );
+    assert_no_repair_temporary_files(&sessions);
+    fs::remove_dir_all(root).expect("fixture should be removed");
+}
+
+#[test]
 fn repair_failure_keeps_source_and_leaves_no_temporary_file() {
     let root = test_temp_dir("session-repair-backup-failure");
     let sessions = root.join("sessions/2026/07/16");
