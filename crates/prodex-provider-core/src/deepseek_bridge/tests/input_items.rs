@@ -277,3 +277,32 @@ fn deepseek_and_kiro_input_item_errors_use_one_compiled_mojo_message_owner() {
         }
     }
 }
+
+#[test]
+fn plaintext_reasoning_replay_preserves_summary_and_rejects_opaque_or_malformed_parts() {
+    let reason = serde_json::json!({"type":"reasoning","summary":[{"type":"summary_text","text":"Inspect safely. 雪"}],"content":null,"encrypted_content":null});
+    let messages = deepseek_provider_core_messages_from_responses_request(
+        &serde_json::json!({"input":[reason]}),
+        &[],
+        false,
+        "Test",
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        messages,
+        vec![
+            serde_json::json!({"role":"assistant","content":"","reasoning_content":"Inspect safely. 雪"})
+        ]
+    );
+    for item in [
+        serde_json::json!({"type":"reasoning","encrypted_content":"opaque"}),
+        serde_json::json!({"type":"reasoning","summary":[{"type":"image","text":"invalid"}]}),
+        serde_json::json!({"type":"reasoning","summary":[{"type":"summary_text","text":3}]}),
+        serde_json::json!({"type":"reasoning","summary":"not-an-array"}),
+    ] {
+        assert!(
+            deepseek_provider_core_validate_supported_input_item(&item, false, "Test").is_err()
+        );
+    }
+}

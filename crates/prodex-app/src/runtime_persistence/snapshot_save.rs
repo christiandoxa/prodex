@@ -32,6 +32,7 @@ fn rewrite_unavailable_state_bindings(
     ] {
         for binding in bindings.values_mut() {
             if !profiles.contains_key(&binding.profile_name)
+                && !super::continuation_store::binding_has_profileless_owner(binding)
                 && !prodex_state::is_hard_binding_conflict_profile(&binding.profile_name)
             {
                 binding.profile_name = prodex_state::HARD_BINDING_CONFLICT_PROFILE.to_string();
@@ -451,4 +452,61 @@ fn persist_runtime_state_selected_snapshot_save(
         save_runtime_profile_backoffs_for_profiles(paths, backoffs, &prepared.profiles)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod local_resume_tests {
+    use super::*;
+    #[test]
+    fn local_resume_snapshot_keeps_profileless_identity_but_not_deleted_named_profiles() {
+        let identity =
+            prodex_provider_core::RuntimeProviderBindingIdentity::from_public_credential_identity(
+                prodex_provider_core::ProviderId::OpenAi,
+                "prodex-local",
+                "http://127.0.0.1:8080/v1",
+                None,
+            )
+            .unwrap();
+        let binding = ResponseProfileBinding {
+            profile_name: "local".into(),
+            bound_at: 1,
+            binding_identity: Some(identity),
+        };
+        let mut state = AppState::default();
+        state
+            .session_profile_bindings
+            .insert("session-fixture".into(), binding.clone());
+        rewrite_unavailable_state_bindings(&mut state, &BTreeMap::new());
+        assert_eq!(state.session_profile_bindings["session-fixture"], binding);
+        let mut store = RuntimeContinuationStore::default();
+        store
+            .session_profile_bindings
+            .insert("session-fixture".into(), binding.clone());
+        rewrite_unavailable_profile_bindings(&mut store, &BTreeMap::new());
+        assert_eq!(store.session_profile_bindings["session-fixture"], binding);
+        for name in ["removed-profile", "local"] {
+            let mut removed = binding.clone();
+            removed.profile_name = name.into();
+            removed.binding_identity =
+                prodex_provider_core::RuntimeProviderBindingIdentity::from_profile(
+                    prodex_provider_core::ProviderId::OpenAi,
+                    name,
+                    "https://example.com/v1",
+                );
+            state
+                .session_profile_bindings
+                .insert("removed".into(), removed.clone());
+            store
+                .session_profile_bindings
+                .insert("removed".into(), removed);
+            rewrite_unavailable_state_bindings(&mut state, &BTreeMap::new());
+            rewrite_unavailable_profile_bindings(&mut store, &BTreeMap::new());
+            assert!(prodex_state::is_hard_binding_conflict_profile(
+                &state.session_profile_bindings["removed"].profile_name
+            ));
+            assert!(prodex_state::is_hard_binding_conflict_profile(
+                &store.session_profile_bindings["removed"].profile_name
+            ));
+        }
+    }
 }

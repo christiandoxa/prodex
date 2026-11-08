@@ -125,3 +125,27 @@ pub(super) fn send_openai_or_local_request(
         request_id, request, shared, body, api_keys, endpoint,
     )
 }
+
+/// A session ID identifies the persisted transcript, not a remote cache in Chat
+/// Completions. Only the explicit local adapter may replay it on its selected URL.
+pub(super) fn is_local_chat_history_replay(
+    shared: &RuntimeLocalRewriteProxyShared,
+    request: &RuntimeProxyRequest,
+) -> bool {
+    if !shared.allow_local_file_access
+        || !matches!(
+            shared.provider.as_ref(),
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses { local: true, .. }
+        )
+        || super::local_rewrite_upstream::runtime_local_rewrite_previous_response_id(&request.body)
+            .is_some()
+        || runtime_proxy_crate::runtime_request_turn_state(request).is_some()
+    {
+        return false;
+    }
+    let Some(model) = super::provider_bridge::runtime_provider_model_from_body(&request.body)
+    else {
+        return false;
+    };
+    prodex_mojo_core::json::local_model_uses_chat_completions(&model).unwrap_or(false)
+}

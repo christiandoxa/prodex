@@ -49,8 +49,8 @@ Prodex selects the local Chat Completions compatibility profile automatically:
 prodex s \
   --url http://127.0.0.1:8899 \
   --model offrail-27b \
-  --context-window 118272 \
-  --auto-compact-token-limit 100000
+  --context-window 169984 \
+  --auto-compact-token-limit 150000
 ```
 
 Use the context size actually configured on your server; the example is not a
@@ -74,6 +74,32 @@ strict template; user, assistant, and tool-result ordering remains unchanged.
 Local upstream requests do not inherit cloud account authorization headers.
 Native `/compact` uses the same adapter, preserving history and the backend's
 parallel-tool control before continuing the conversation.
+
+Resume a saved **local-provider** conversation with the same explicit settings:
+
+```bash
+prodex s <SESSION_UUID> \
+  --url http://127.0.0.1:8899 \
+  --model offrail-27b \
+  --context-window 169984 \
+  --auto-compact-token-limit 150000
+```
+
+The in-app `/resume` picker uses the same local adapter. The explicit local URL
+selects a stateless Chat Completions backend: Codex replays the saved transcript,
+not a hosted-provider response cache. Historical session-only binding tombstones
+must not block that replay. This exception does not apply to opaque response IDs,
+turn-state continuations, hosted providers, or gateway tenant traffic. Such
+continuations remain bound to their original provider and endpoint.
+
+The adapter emits an actual Responses reasoning item before summary deltas and
+closes it before answer/tool items. Plaintext reasoning survives tool-result and
+saved-session replay; encrypted hosted-provider reasoning is not decrypted or
+silently treated as plaintext. Codex can display the model-provided reasoning
+while it streams, and `prodex log` reads the persisted reasoning. A log follower
+started before a short new conversation picks up its bounded complete tail on
+the next session-discovery tick; it does not replay an entire historical file.
+No synthetic reasoning is added to responses that contain none.
 
 RTK, Codebase Memory MCP, Playwright MCP, and Ponytail retain Super's automatic
 activation. Presidio still asks for consent. Missing/incompatible external tools

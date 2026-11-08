@@ -328,7 +328,9 @@ fn read_token_usage_events_tick_with_live(
     for path in &current_session_paths {
         let state = followed_session_logs
             .entry(path.clone())
-            .or_insert_with(|| FollowedLog::at_end(path));
+            .or_insert_with(|| {
+                FollowedLog::at_recent_tail(path, super::SESSION_SNAPSHOT_TAIL_BYTES)
+            });
         for event in collect_new_transcript_events(path, state)? {
             if json {
                 print_log_stream_item(&LogStreamItem::Transcript(event), true)?;
@@ -451,7 +453,9 @@ fn collect_log_stream_items_with_live(
     for path in &current_session_paths {
         let state = followed_session_logs
             .entry(path.clone())
-            .or_insert_with(|| FollowedLog::at_end(path));
+            .or_insert_with(|| {
+                FollowedLog::at_recent_tail(path, super::SESSION_SNAPSHOT_TAIL_BYTES)
+            });
         for event in collect_new_transcript_events(path, state)? {
             push_log_stream_item(items, LogStreamItem::Transcript(event));
         }

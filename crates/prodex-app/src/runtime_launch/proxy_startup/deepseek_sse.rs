@@ -3,9 +3,7 @@
 
 use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_label,
-    runtime_provider_stream_reasoning_summary_text_delta_event,
-    runtime_provider_stream_text_delta_event,
+    RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_stream_text_delta_event,
 };
 use prodex_domain::{CallId, RequestId};
 use prodex_provider_core::{
@@ -20,6 +18,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 mod completion;
+mod reasoning;
 mod tool_calls;
 
 pub(super) struct RuntimeDeepSeekSseState {
@@ -36,6 +35,7 @@ pub(super) struct RuntimeDeepSeekSseState {
     reasoning_summary_part_added: bool,
     reasoning_summary_done: bool,
     model: Option<String>,
+    output_indices: BTreeMap<String, usize>,
     output_text: String,
     reasoning_content: String,
     refusal: String,
@@ -177,6 +177,7 @@ impl RuntimeDeepSeekSseState {
             reasoning_summary_part_added: false,
             reasoning_summary_done: false,
             model: None,
+            output_indices: BTreeMap::new(),
             output_text: String::new(),
             reasoning_content: String::new(),
             refusal: String::new(),
@@ -283,28 +284,29 @@ impl RuntimeDeepSeekSseState {
     }
 
     fn observe_content_delta(&mut self, text: &str) -> Vec<String> {
-        let mut events: Vec<String> = self.output_text_item_added_event().into_iter().collect();
+        let mut events = self.complete_reasoning_events();
+        events.extend(self.output_text_item_added_event());
         self.output_text.push_str(text);
         let sequence_number = self.next_sequence_number();
         let upstream_value = deepseek_provider_core_stream_text_delta_source(text);
-        if let Some((event_name, data)) = runtime_provider_stream_text_delta_event(
+        if let Some((event_name, mut data)) = runtime_provider_stream_text_delta_event(
             self.provider_kind,
             &upstream_value,
             sequence_number,
             self.created_at,
             &self.response_id,
         ) {
+            self.decorate_text_delta(&mut data);
             events.push(self.event(&event_name, data));
         } else {
-            events.push(self.event(
-                "response.output_text.delta",
-                deepseek_provider_core_output_text_delta_event(
-                    sequence_number,
-                    self.created_at,
-                    &self.response_id,
-                    text,
-                ),
-            ));
+            let mut data = deepseek_provider_core_output_text_delta_event(
+                sequence_number,
+                self.created_at,
+                &self.response_id,
+                text,
+            );
+            self.decorate_text_delta(&mut data);
+            events.push(self.event("response.output_text.delta", data));
         }
         events
     }
@@ -331,56 +333,6 @@ impl RuntimeDeepSeekSseState {
         };
         if !self.tool_calls.is_empty() {
             self.store_conversation_snapshot();
-        }
-        events
-    }
-
-    pub(super) fn observe_reasoning_delta(
-        &mut self,
-        upstream_value: &serde_json::Value,
-        text: &str,
-    ) -> Vec<String> {
-        if text.is_empty() {
-            return Vec::new();
-        }
-        self.reasoning_content.push_str(text);
-        let mut events = Vec::new();
-        if !self.reasoning_summary_part_added {
-            self.reasoning_summary_part_added = true;
-            let sequence_number = self.next_sequence_number();
-            events.push(self.event(
-                "response.reasoning_summary_part.added",
-                serde_json::json!({
-                    "type": "response.reasoning_summary_part.added",
-                    "sequence_number": sequence_number,
-                    "response_id": self.response_id,
-                    "output_index": 0,
-                    "summary_index": 0,
-                    "part": {"type": "summary_text", "text": ""},
-                }),
-            ));
-        }
-        let sequence_number = self.next_sequence_number();
-        if let Some((event_name, data)) = runtime_provider_stream_reasoning_summary_text_delta_event(
-            self.provider_kind,
-            upstream_value,
-            sequence_number,
-            &self.response_id,
-            0,
-        ) {
-            events.push(self.event(&event_name, data));
-        } else {
-            events.push(self.event(
-                "response.reasoning_summary_text.delta",
-                serde_json::json!({
-                    "type": "response.reasoning_summary_text.delta",
-                    "sequence_number": sequence_number,
-                    "response_id": self.response_id,
-                    "output_index": 0,
-                    "summary_index": 0,
-                    "delta": text,
-                }),
-            ));
         }
         events
     }

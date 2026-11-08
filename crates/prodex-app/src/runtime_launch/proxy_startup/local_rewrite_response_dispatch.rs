@@ -42,7 +42,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
         body,
         native_anthropic_messages,
         mut chat_compatible_request,
-        accepted_binding_recorder,
+        mut accepted_binding_recorder,
         accepted_binding,
         ..
     } = live_response;
@@ -79,6 +79,14 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
             binding.session_id.as_deref(),
         );
     }
+    // Record the Responses IDs after Chat translation, not the raw Chat frames.
+    let translated_binding_recorder = if chat_compatible_request.is_some()
+        && shared.provider.bridge_kind() == RuntimeProviderBridgeKind::OpenAiResponses
+    {
+        accepted_binding_recorder.take()
+    } else {
+        None
+    };
     let mut buffered_binding_recorder = None;
     if let Some(binding_recorder) = accepted_binding_recorder {
         if content_type.contains("text/event-stream") {
@@ -112,7 +120,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     captured,
                     provider_kind: RuntimeProviderBridgeKind::OpenAiResponses,
                     profile_name: None,
-                    binding_recorder: None,
+                    binding_recorder: translated_binding_recorder,
                     pending_request: chat_compatible_request.take().unwrap_or_default(),
                     response_governance,
                 },

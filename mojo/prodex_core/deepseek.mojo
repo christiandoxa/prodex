@@ -6052,6 +6052,14 @@ def deepseek_raw_bridge_input_item(
             writer, view, item
         ):
             return False
+    elif deepseek_raw_present(kind) and deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("reasoning")):
+        var parts = deepseek_raw_member(view, item, StringSlice("summary"))
+        if not deepseek_json_bounds_is_kind(view, parts, 91) or deepseek_json_skip_ws(view, parts[0] + 1, parts[1] - 1) == parts[1] - 1:
+            parts = deepseek_raw_member(view, item, StringSlice("content"))
+        if not deepseek_put_literal(writer, StringSlice('{"role":"assistant","content":"","reasoning_content":')):
+            return False
+        if not deepseek_raw_text_from_content(writer, view, parts) or not deepseek_put_byte(writer, 125):
+            return False
     elif is_output:
         if input.stream == 1 and not deepseek_raw_put_tool_output_message_from_item(
             writer, view, item
@@ -6176,6 +6184,35 @@ def deepseek_input_item_content_part_tag(
     return result.copy()
 
 
+
+def deepseek_plain_reasoning_parts_valid(view: ProdexRichStringView, root: Array[Int64, 2]) -> Bool:
+    var encrypted = deepseek_raw_member(view, root, StringSlice("encrypted_content"))
+    if deepseek_raw_present(encrypted) and deepseek_json_byte(view, encrypted[0]) != 110:
+        return False
+    for field_index in range(2):
+        var field = StringSlice("summary") if field_index == 0 else StringSlice("content")
+        var parts = deepseek_raw_member(view, root, field)
+        if not deepseek_raw_present(parts) or deepseek_json_byte(view, parts[0]) == 110:
+            continue
+        if not deepseek_json_bounds_is_kind(view, parts, 91):
+            return False
+        var cursor = deepseek_json_skip_ws(view, parts[0] + 1, parts[1] - 1)
+        while cursor < parts[1] - 1:
+            var end = deepseek_json_value_end(view, cursor, parts[1] - 1, 0)
+            if end < 0 or deepseek_json_byte(view, cursor) != 123:
+                return False
+            var kind = deepseek_json_object_member(view, cursor, end, StringSlice("type"))
+            var text = deepseek_json_object_member(view, cursor, end, StringSlice("text"))
+            if not deepseek_json_bounds_is_kind(view, text, 34) or not (
+                deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("summary_text"))
+                or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("reasoning_text"))
+            ):
+                return False
+            cursor = deepseek_json_skip_ws(view, end, parts[1] - 1)
+            if cursor < parts[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+                cursor = deepseek_json_skip_ws(view, cursor + 1, parts[1] - 1)
+    return True
+
 def deepseek_input_item_validation(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     input: ProdexDeepSeekKernelInput,
@@ -6192,6 +6229,8 @@ def deepseek_input_item_validation(
     var kind = deepseek_raw_member(view, root, StringSlice("type"))
     if not deepseek_raw_present(kind):
         return deepseek_input_item_issue(writer, 0, view, missing)
+    if deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("reasoning")):
+        return deepseek_input_item_issue(writer, Int64(0 if deepseek_plain_reasoning_parts_valid(view, root) else 15), view, kind)
     var is_message = deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("message"))
     var is_call = (
         deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("function_call"))
@@ -6953,6 +6992,7 @@ comptime DEEPSEEK_REPLAY_ITEM_TEXT: Int64 = 0
 comptime DEEPSEEK_REPLAY_ITEM_CALL: Int64 = 1
 comptime DEEPSEEK_REPLAY_ITEM_OUTPUT: Int64 = 2
 comptime DEEPSEEK_REPLAY_ITEM_MCP_CALL: Int64 = 3
+comptime DEEPSEEK_REPLAY_ITEM_REASONING: Int64 = 4
 
 
 @export("prodex_deepseek_replay_item_kind_v1")
@@ -6974,7 +7014,9 @@ def prodex_deepseek_replay_item_kind_v1(
     if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
         return 1
     var kind = DEEPSEEK_REPLAY_ITEM_TEXT
-    if rich_view_matches_literal["mcp_call"](view, False):
+    if rich_view_matches_literal["reasoning"](view, False):
+        kind = DEEPSEEK_REPLAY_ITEM_REASONING
+    elif rich_view_matches_literal["mcp_call"](view, False):
         kind = DEEPSEEK_REPLAY_ITEM_MCP_CALL
     elif (
         rich_view_matches_literal["function_call"](view, False)
@@ -7010,7 +7052,7 @@ def prodex_deepseek_replay_item_action_v1(
     if abi_version != DEEPSEEK_REPLAY_ITEM_ABI_VERSION:
         return 4
     if (
-        kind < DEEPSEEK_REPLAY_ITEM_TEXT or kind > DEEPSEEK_REPLAY_ITEM_MCP_CALL
+        kind < DEEPSEEK_REPLAY_ITEM_TEXT or kind > DEEPSEEK_REPLAY_ITEM_REASONING
         or (replayed_call != 0 and replayed_call != 1)
         or (replayed_output != 0 and replayed_output != 1)
         or output_field_mask < 0 or output_field_mask > 15

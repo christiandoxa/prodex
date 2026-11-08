@@ -30,6 +30,7 @@ pub enum DeepSeekReplayItemKind {
     Call = 1,
     Output = 2,
     McpCall = 3,
+    Reasoning = 4,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +73,7 @@ pub fn deepseek_replay_item_kind(
         1 => Ok(DeepSeekReplayItemKind::Call),
         2 => Ok(DeepSeekReplayItemKind::Output),
         3 => Ok(DeepSeekReplayItemKind::McpCall),
+        4 => Ok(DeepSeekReplayItemKind::Reasoning),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -126,6 +128,7 @@ mod tests {
             (None, DeepSeekReplayItemKind::Text),
             (Some(""), DeepSeekReplayItemKind::Text),
             (Some("mcp_call"), DeepSeekReplayItemKind::McpCall),
+            (Some("reasoning"), DeepSeekReplayItemKind::Reasoning),
             (Some("function_call"), DeepSeekReplayItemKind::Call),
             (Some("custom_tool_call"), DeepSeekReplayItemKind::Call),
             (Some("local_shell_call"), DeepSeekReplayItemKind::Call),
@@ -296,7 +299,7 @@ mod tests {
             1
         );
         assert_eq!(action(2, 0, 0, 0, 0, 0, 0, target, 3), 4);
-        assert_eq!(action(1, 4, 0, 0, 0, 0, 0, target, 3), 1);
+        assert_eq!(action(1, 5, 0, 0, 0, 0, 0, target, 3), 1);
         assert_eq!(action(1, 0, 2, 0, 0, 0, 0, target, 3), 1);
         assert_eq!(action(1, 0, 0, -1, 0, 0, 0, target, 3), 1);
         assert_eq!(action(1, 0, 0, 0, 16, 0, 0, target, 3), 1);

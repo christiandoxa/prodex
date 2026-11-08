@@ -24,7 +24,8 @@ impl RuntimeDeepSeekSseState {
     pub(super) fn observe_tool_call_delta(&mut self, value: &serde_json::Value) -> Vec<String> {
         let delta = deepseek_provider_core_stream_tool_call_delta(value);
         let index = delta.index;
-        let mut events = Vec::new();
+        let mut events = self.complete_reasoning_events();
+        events.extend(self.complete_output_text_item_events());
         let provider_label = self.provider_kind.chat_compatible_adapter_label();
         if let Err(message) = deepseek_provider_core_validate_stream_tool_call_delta(
             provider_label,
@@ -87,12 +88,17 @@ impl RuntimeDeepSeekSseState {
                 return events;
             }
         };
+        let output_index = self.item_output_index(&call_id);
         if plan.add_item
-            && let Some(item) = deepseek_provider_core_stream_tool_call_added_item(&call_id, &name)
+            && let Some(mut item) =
+                deepseek_provider_core_stream_tool_call_added_item(&call_id, &name)
         {
+            item["id"] = call_id.clone().into();
             let sequence_number = self.next_sequence_number();
             let mut data = deepseek_provider_core_output_item_added_event(sequence_number, &item);
-            data["output_index"] = serde_json::Value::from(index);
+            data["output_index"] = serde_json::Value::from(output_index);
+            data["item_id"] = call_id.clone().into();
+            data["response_id"] = self.response_id.clone().into();
             events.push(self.event("response.output_item.added", data));
         }
         if !plan.emit_argument_delta {
@@ -112,7 +118,9 @@ impl RuntimeDeepSeekSseState {
                 sequence_number,
             )
         {
-            data["output_index"] = serde_json::Value::from(index);
+            data["output_index"] = serde_json::Value::from(output_index);
+            data["item_id"] = call_id.clone().into();
+            data["response_id"] = self.response_id.clone().into();
             events.push(self.event(&event_name, data));
         } else {
             let mut data = deepseek_provider_core_function_call_arguments_delta_event(
@@ -120,7 +128,9 @@ impl RuntimeDeepSeekSseState {
                 &call_id,
                 &arguments,
             );
-            data["output_index"] = serde_json::Value::from(index);
+            data["output_index"] = serde_json::Value::from(output_index);
+            data["item_id"] = call_id.clone().into();
+            data["response_id"] = self.response_id.clone().into();
             events.push(self.event("response.function_call_arguments.delta", data));
         }
         events
@@ -171,16 +181,20 @@ impl RuntimeDeepSeekSseState {
                 )
             })
             .collect::<Vec<_>>();
-        for (index, call_id, name, arguments, thought_signature) in pending {
+        for (_index, call_id, name, arguments, thought_signature) in pending {
+            let output_index = self.item_output_index(&call_id);
             let sequence_number = self.next_sequence_number();
-            let item = deepseek_provider_core_stream_tool_call_item(
+            let mut item = deepseek_provider_core_stream_tool_call_item(
                 &call_id,
                 &name,
                 &arguments,
                 thought_signature.as_deref(),
             );
+            item["id"] = call_id.clone().into();
             let mut data = deepseek_provider_core_output_item_done_event(sequence_number, &item);
-            data["output_index"] = serde_json::Value::from(index);
+            data["output_index"] = serde_json::Value::from(output_index);
+            data["item_id"] = call_id.clone().into();
+            data["response_id"] = self.response_id.clone().into();
             events.push(self.event("response.output_item.done", data));
         }
         Ok(events)

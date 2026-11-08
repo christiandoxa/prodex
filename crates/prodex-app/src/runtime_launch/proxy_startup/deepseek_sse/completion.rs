@@ -2,10 +2,7 @@
 
 use super::super::deepseek_rewrite::runtime_deepseek_store_conversation;
 use super::super::provider_bridge::runtime_provider_label;
-use super::super::provider_sse_events::{
-    runtime_provider_sse_failed_event, runtime_provider_sse_output_text_item_added_event,
-    runtime_provider_sse_output_text_item_done_event,
-};
+use super::super::provider_sse_events::runtime_provider_sse_failed_event;
 use super::RuntimeDeepSeekSseState;
 use prodex_provider_core::{
     DeepSeekProviderCoreStreamChatToolCall, deepseek_provider_core_response_completed_event,
@@ -90,7 +87,7 @@ impl RuntimeDeepSeekSseState {
         ))
     }
 
-    fn output_text_item_id(&self) -> String {
+    pub(super) fn output_text_item_id(&self) -> String {
         deepseek_provider_core_stream_output_text_item_id(
             runtime_provider_label(self.provider_kind),
             self.request_id,
@@ -102,50 +99,24 @@ impl RuntimeDeepSeekSseState {
             return None;
         }
         self.output_text_item_added = true;
-        let sequence_number = self.next_sequence_number();
-        Some(runtime_provider_sse_output_text_item_added_event(
-            sequence_number,
-            &self.response_id,
-            &self.output_text_item_id(),
-        ))
+        let id = self.output_text_item_id();
+        let item = serde_json::json!({"id":id,"type":"message","role":"assistant","status":"in_progress","content":[]});
+        Some(self.output_item_event("response.output_item.added", &id, item))
     }
 
-    fn complete_output_text_item_events(&mut self) -> Vec<String> {
+    pub(super) fn complete_output_text_item_events(&mut self) -> Vec<String> {
         if self.output_text.is_empty() || self.output_text_item_done {
             return Vec::new();
         }
         let mut events = Vec::new();
-        if let Some(event) = self.output_text_item_added_event() {
-            events.push(event);
-        }
+        events.extend(self.output_text_item_added_event());
         self.output_text_item_done = true;
-        let sequence_number = self.next_sequence_number();
-        events.push(runtime_provider_sse_output_text_item_done_event(
-            sequence_number,
-            &self.response_id,
-            &self.output_text_item_id(),
-            &self.output_text,
-        ));
+        let id = self.output_text_item_id();
+        let mut item = deepseek_provider_core_stream_output_text_item(&self.output_text);
+        item["id"] = id.clone().into();
+        item["status"] = "completed".into();
+        events.push(self.output_item_event("response.output_item.done", &id, item));
         events
-    }
-
-    fn complete_reasoning_events(&mut self) -> Vec<String> {
-        if self.reasoning_content.is_empty() || self.reasoning_summary_done {
-            return Vec::new();
-        }
-        self.reasoning_summary_done = true;
-        let sequence_number = self.next_sequence_number();
-        vec![self.event(
-            "response.reasoning_summary_text.done",
-            serde_json::json!({
-                "type": "response.reasoning_summary_text.done",
-                "sequence_number": sequence_number,
-                "response_id": self.response_id,
-                "output_index": 0,
-                "summary_index": 0,
-                "text": self.reasoning_content,
-            }),
-        )]
     }
 
     pub(super) fn store_conversation_snapshot(&self) {
@@ -190,10 +161,14 @@ impl RuntimeDeepSeekSseState {
 
     fn output_items(&self) -> Vec<serde_json::Value> {
         let mut output = self.external_output_items.clone();
+        if !self.reasoning_content.is_empty() {
+            output.push(self.reasoning_item());
+        }
         if !self.output_text.is_empty() {
-            output.push(deepseek_provider_core_stream_output_text_item(
-                &self.output_text,
-            ));
+            let mut item = deepseek_provider_core_stream_output_text_item(&self.output_text);
+            item["id"] = self.output_text_item_id().into();
+            item["status"] = "completed".into();
+            output.push(item);
         }
         for (index, tool_call) in &self.tool_calls {
             let call_id = tool_call.call_id.clone().unwrap_or_else(|| {
@@ -207,13 +182,22 @@ impl RuntimeDeepSeekSseState {
                 .name
                 .clone()
                 .unwrap_or_else(|| "tool_call".to_string());
-            output.push(deepseek_provider_core_stream_tool_call_item(
+            let mut item = deepseek_provider_core_stream_tool_call_item(
                 &call_id,
                 &flat_name,
                 &tool_call.arguments,
                 tool_call.thought_signature.as_deref(),
-            ));
+            );
+            item["id"] = call_id.into();
+            output.push(item);
         }
+        output.sort_by_key(|item| {
+            item["id"]
+                .as_str()
+                .and_then(|id| self.output_indices.get(id))
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         output
     }
 

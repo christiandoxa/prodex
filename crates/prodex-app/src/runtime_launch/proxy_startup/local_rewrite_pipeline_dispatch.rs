@@ -331,6 +331,12 @@ fn runtime_local_rewrite_validate_bound_provider(
     selected_provider: ProviderId,
     selected_identity: Option<&RuntimeProviderBindingIdentity>,
 ) -> Result<(), anyhow::Error> {
+    // An explicitly selected stateless local Chat adapter replays the client-supplied
+    // transcript. A persisted session-only cloud/legacy binding is not an opaque
+    // server continuation. Response IDs and turn-state tokens still fail closed.
+    if super::super::local_rewrite_local_chat::is_local_chat_history_replay(shared, request) {
+        return Ok(());
+    }
     let binding = runtime_local_rewrite_request_bound_binding(shared, request)?;
     match prodex_mojo_core::runtime_lineage::dispatch_binding_candidate_decision(
         prodex_mojo_core::runtime_lineage::RuntimeLineageDispatchBindingCandidate {
@@ -364,6 +370,17 @@ fn runtime_local_rewrite_single_binding_identity(
             provider,
             &auth.profile_name,
             &shared.upstream_base_url,
+        );
+    }
+    if matches!(
+        shared.provider.as_ref(),
+        RuntimeLocalRewriteProviderOptions::OpenAiResponses { local: true, .. }
+    ) {
+        return RuntimeProviderBindingIdentity::from_public_credential_identity(
+            provider,
+            "prodex-local",
+            &shared.upstream_base_url,
+            None,
         );
     }
     RuntimeProviderBindingIdentity::from_profile(

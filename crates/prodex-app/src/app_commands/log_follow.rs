@@ -33,6 +33,25 @@ impl FollowedLog {
         }
     }
 
+    /// New files may already contain an entire short turn by the next discovery tick.
+    /// Replay only their bounded complete-line tail, not an unbounded historical scan.
+    pub(crate) fn at_recent_tail(path: &Path, max_bytes: usize) -> Self {
+        let read = || -> io::Result<u64> {
+            let mut file = fs::File::open(path)?;
+            let length = file.metadata()?.len();
+            let start = length.saturating_sub(max_bytes as u64);
+            file.seek(SeekFrom::Start(start))?;
+            let mut bytes = Vec::new();
+            file.take(length - start).read_to_end(&mut bytes)?;
+            let skipped = prodex_mojo_core::rich::log_tail_boundary(&bytes, start > 0)
+                .expect("compiled Mojo log tail boundary returned invalid output");
+            Ok(start + skipped as u64)
+        };
+        read()
+            .map(Self::with_offset)
+            .unwrap_or_else(|_| Self::at_end(path))
+    }
+
     pub(crate) fn at_end(path: &Path) -> Self {
         Self::with_offset(
             fs::metadata(path)
@@ -469,3 +488,7 @@ mod compiled_follow_framing_caller_tests {
         assert!(state.pending.is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "log_new_session_tests.rs"]
+mod new_session_tests;

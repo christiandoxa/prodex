@@ -150,10 +150,13 @@ fn deepseek_sse_reader_omits_empty_choice_text_and_preserves_whitespace() {
         .find(|value| value["type"] == "response.created")
         .and_then(|value| value["created_at"].as_u64())
         .expect("response.created carries the stream timestamp");
-    let exact_text_delta = format!(
-        "event: response.output_text.delta\r\ndata: {{\"created_at\":{created_at},\"delta\":\" \",\"response_id\":\"chatcmpl_empty_delta\",\"sequence_number\":4,\"type\":\"response.output_text.delta\"}}\r\n\r\n"
-    );
-    assert!(output.contains(&exact_text_delta), "{output}");
+    assert_eq!(text_deltas[0]["created_at"], created_at);
+    let message = values
+        .iter()
+        .find(|v| v["type"] == "response.output_item.added" && v["item"]["type"] == "message")
+        .unwrap();
+    assert_eq!(text_deltas[0]["item_id"], message["item"]["id"]);
+    assert_eq!(text_deltas[0]["output_index"], message["output_index"]);
 }
 
 #[test]
@@ -717,3 +720,6 @@ fn deepseek_sse_reader_accumulates_multiline_json_data() {
 
 #[path = "deepseek_sse_tests_metadata.rs"]
 mod metadata;
+
+#[path = "deepseek_sse_tests/reasoning_lifecycle.rs"]
+mod reasoning_lifecycle;

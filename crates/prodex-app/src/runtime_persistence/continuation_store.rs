@@ -41,6 +41,19 @@ pub(crate) fn merge_runtime_continuation_store(
     )
 }
 
+/// Profileless adapters are not entries in the user-managed profile registry.
+/// Only the reserved adapter label with an explicitly profileless identity qualifies;
+/// a deleted named profile (including one named `local`) must remain unavailable.
+pub(super) fn binding_has_profileless_owner(
+    binding: &prodex_state::ResponseProfileBinding,
+) -> bool {
+    binding.profile_name == "local"
+        && binding
+            .binding_identity
+            .as_ref()
+            .is_some_and(|identity| identity.profile().is_none())
+}
+
 pub(crate) fn rewrite_unavailable_profile_bindings(
     continuations: &mut RuntimeContinuationStore,
     profiles: &BTreeMap<String, ProfileEntry>,
@@ -53,6 +66,7 @@ pub(crate) fn rewrite_unavailable_profile_bindings(
     ] {
         for binding in bindings.values_mut() {
             if !profiles.contains_key(&binding.profile_name)
+                && !binding_has_profileless_owner(binding)
                 && binding.profile_name
                     != prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
             {
