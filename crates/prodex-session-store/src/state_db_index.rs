@@ -231,11 +231,22 @@ fn state_row_session_id(thread_id: &str, rollout_path: &str) -> Option<String> {
         .or_else(|| codex_session_id_from_path(Path::new(rollout_path)))
 }
 
-fn persistent_overlay_replacement(
+pub(super) fn persistent_overlay_replacement(
     root: &Path,
     stale_path: &str,
     session_id: &str,
 ) -> Option<PathBuf> {
+    persistent_overlay_candidates(root, stale_path)?
+        .into_iter()
+        .find(|candidate| {
+            path_is_contained_regular_file(root, candidate)
+                && is_session_metadata_file(candidate)
+                && session_file_has_resume_metadata_for_selector(candidate, session_id)
+                    .unwrap_or(false)
+        })
+}
+
+pub(super) fn persistent_overlay_candidates(root: &Path, stale_path: &str) -> Option<[PathBuf; 2]> {
     let path = Path::new(stale_path);
     let components = path.components().collect::<Vec<_>>();
     let overlay_index = components.iter().position(|component| {
@@ -272,15 +283,10 @@ fn persistent_overlay_replacement(
     } else {
         "sessions"
     };
-    [storage.as_ref(), alternate_storage]
-        .into_iter()
-        .map(|storage| root.join(storage).join(&relative))
-        .find(|candidate| {
-            path_is_contained_regular_file(root, candidate)
-                && is_session_metadata_file(candidate)
-                && session_file_has_resume_metadata_for_selector(candidate, session_id)
-                    .unwrap_or(false)
-        })
+    Some([
+        root.join(storage.as_ref()).join(&relative),
+        root.join(alternate_storage).join(relative),
+    ])
 }
 
 fn find_persistent_rollout_by_session_id(root: &Path, session_id: &str) -> Option<PathBuf> {
@@ -325,7 +331,7 @@ fn persistent_rollout_candidate(root: &Path, path: PathBuf, session_id: &str) ->
     }
 }
 
-fn is_codex_state_db_path(path: &Path) -> bool {
+pub(super) fn is_codex_state_db_path(path: &Path) -> bool {
     let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
@@ -452,7 +458,7 @@ fn session_repair_match_kind(
     }
 }
 
-fn resolve_state_db_rollout_path(codex_home: &Path, rollout_path: &str) -> PathBuf {
+pub(super) fn resolve_state_db_rollout_path(codex_home: &Path, rollout_path: &str) -> PathBuf {
     let path = PathBuf::from(rollout_path);
     if path.is_absolute() {
         path
@@ -467,7 +473,7 @@ fn path_is_regular_file_no_symlink(path: &Path) -> bool {
         .is_some_and(|metadata| metadata.file_type().is_file())
 }
 
-fn path_is_contained_regular_file(root: &Path, path: &Path) -> bool {
+pub(super) fn path_is_contained_regular_file(root: &Path, path: &Path) -> bool {
     let Ok(relative) = path.strip_prefix(root) else {
         return false;
     };

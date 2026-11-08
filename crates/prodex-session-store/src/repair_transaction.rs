@@ -24,13 +24,35 @@ pub(super) struct SessionRepairTransaction {
 
 impl SessionRepairTransaction {
     pub(super) fn begin(repository_root: &Path, path: &Path, max_bytes: u64) -> Result<Self> {
+        let maintenance_lock = acquire_repository_lock(repository_root)?;
+        Self::begin_with_lock(path, max_bytes, maintenance_lock)
+    }
+
+    pub(super) fn try_begin(
+        repository_root: &Path,
+        path: &Path,
+        max_bytes: u64,
+    ) -> Result<Option<Self>> {
+        require_directory(repository_root)?;
+        let lock_path = repository_root.join(REPAIR_LOCK_FILE);
+        let lock = open_lock_file(&lock_path)?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(error) => return Err(error).context("failed to acquire session repair lock"),
+        }
+        set_private_mode(&lock, &lock_path)?;
+        verify_named_file(&lock_path, &lock)?;
+        Self::begin_with_lock(path, max_bytes, lock).map(Some)
+    }
+
+    fn begin_with_lock(path: &Path, max_bytes: u64, maintenance_lock: File) -> Result<Self> {
         let parent = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
         require_directory(&parent)?;
-        let maintenance_lock = acquire_repository_lock(repository_root)?;
         let (source, metadata) = open_regular_file(path, false)?;
         if metadata.len() > max_bytes {
             bail!(
@@ -81,7 +103,11 @@ impl SessionRepairTransaction {
     }
 
     pub(super) fn commit(self, repaired: &[u8]) -> Result<()> {
-        self.commit_inner(repaired, || {})
+        self.commit_inner(repaired, None, || {})
+    }
+
+    pub(super) fn commit_provider_identity(self, repaired: &[u8]) -> Result<()> {
+        self.commit_inner(repaired, Some("prodex-provider-identity-bak"), || {})
     }
 
     #[cfg(test)]
@@ -90,12 +116,13 @@ impl SessionRepairTransaction {
         repaired: &[u8],
         before_source_verification: impl FnOnce(),
     ) -> Result<()> {
-        self.commit_inner(repaired, before_source_verification)
+        self.commit_inner(repaired, None, before_source_verification)
     }
 
     fn commit_inner(
         self,
         repaired: &[u8],
+        exact_backup_suffix: Option<&str>,
         before_source_verification: impl FnOnce(),
     ) -> Result<()> {
         let Self {
@@ -108,7 +135,7 @@ impl SessionRepairTransaction {
             _maintenance_lock,
         } = self;
         verify_source(&path, &source, &source_revision)?;
-        let mut backup = ensure_backup(&path, &source_bytes)?;
+        let mut backup = ensure_backup(&path, &source_bytes, exact_backup_suffix)?;
 
         let result = (|| {
             let mut temporary = create_temporary_file(&path)?;
@@ -199,34 +226,81 @@ pub(super) fn repository_root(path: &Path) -> &Path {
 fn acquire_repository_lock(root: &Path) -> Result<File> {
     require_directory(root)?;
     let path = root.join(REPAIR_LOCK_FILE);
-    let (file, created) = match CreatedPrivateFile::create(&path) {
-        Ok(created) => (created.into_file(), true),
+    let file = open_lock_file(&path)?;
+    set_private_mode(&file, &path)?;
+    file.lock()
+        .with_context(|| format!("failed to lock session repository {}", root.display()))?;
+    verify_named_file(&path, &file)?;
+    Ok(file)
+}
+
+fn open_lock_file(path: &Path) -> Result<File> {
+    match CreatedPrivateFile::create(path) {
+        Ok(created) => {
+            let file = created.into_file();
+            file.sync_all()?;
+            sync_directory(path.parent().context("lock has no parent")?)?;
+            Ok(file)
+        }
         Err(error)
             if error.kind() == io::ErrorKind::AlreadyExists
                 || path.try_exists().unwrap_or(false) =>
         {
-            let (file, _) = open_regular_file(&path, true)?;
-            set_private_mode(&file, &path)?;
-            (file, false)
+            let (file, _) = open_regular_file(path, true)?;
+            Ok(file)
         }
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to create repair lock {}", path.display()));
-        }
-    };
-    file.lock()
-        .with_context(|| format!("failed to lock session repository {}", root.display()))?;
-    verify_named_file(&path, &file)?;
-    if created {
-        file.sync_all()
-            .with_context(|| format!("failed to sync repair lock {}", path.display()))?;
-        sync_directory(root)?;
+        Err(error) => Err(error).context("failed to create session coordination lock"),
     }
-    Ok(file)
 }
 
-fn ensure_backup(path: &Path, contents: &[u8]) -> Result<Option<CreatedPrivateFile>> {
-    let backup_path = backup_path(path);
+/// Match native Codex publication locking and keep all guards alive through file/index repair.
+/// Holding coordination prevents lock-file removal/recreation between the writer probe and rename.
+pub(super) fn try_native_publication_locks(root: &Path, id: &str) -> Result<Option<Vec<File>>> {
+    require_directory(root)?;
+    anyhow::ensure!(
+        super::full_codex_session_id(id).is_some(),
+        "invalid session lock identity"
+    );
+    let mut locks = Vec::new();
+    for (directory, name) in [
+        (".tmp", "rollout-maintenance.lock".to_string()),
+        ("thread-writer-locks", ".coordination.lock".to_string()),
+        ("thread-writer-locks", format!("{id}.lock")),
+    ] {
+        let parent = root.join(directory);
+        match fs::create_dir(&parent) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error).context("failed to create session lock directory"),
+        }
+        require_directory(&parent)?;
+        let path = parent.join(name);
+        let file = open_lock_file(&path)?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(error) => return Err(error).context("failed to acquire native session lock"),
+        }
+        verify_named_file(&path, &file)?;
+        locks.push(file);
+    }
+    Ok(Some(locks))
+}
+
+fn ensure_backup(
+    path: &Path,
+    contents: &[u8],
+    exact_backup_suffix: Option<&str>,
+) -> Result<Option<CreatedPrivateFile>> {
+    let backup_path = match exact_backup_suffix {
+        Some(suffix) => path.with_extension(format!(
+            "{}.{suffix}",
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or("session")
+        )),
+        None => backup_path(path),
+    };
     match CreatedPrivateFile::create(&backup_path) {
         Ok(mut backup) => {
             backup
@@ -248,7 +322,21 @@ fn ensure_backup(path: &Path, contents: &[u8]) -> Result<Option<CreatedPrivateFi
             if error.kind() == io::ErrorKind::AlreadyExists
                 || backup_path.try_exists().unwrap_or(false) =>
         {
-            let (backup, _) = open_regular_file(&backup_path, false)?;
+            let (backup, metadata) = open_regular_file(&backup_path, false)?;
+            if exact_backup_suffix.is_some() {
+                anyhow::ensure!(
+                    metadata.len() == contents.len() as u64,
+                    "provider backup differs from current session"
+                );
+                let mut existing = Vec::new();
+                (&backup)
+                    .take(contents.len() as u64 + 1)
+                    .read_to_end(&mut existing)?;
+                anyhow::ensure!(
+                    existing == contents,
+                    "provider backup differs from current session"
+                );
+            }
             set_private_mode(&backup, &backup_path)?;
             backup
                 .sync_all()

@@ -113,6 +113,30 @@ fn try_lock_codex_session_maintenance(codex_home: &Path) -> Result<Option<fs::Fi
     }
 }
 
+/// Prepare historical Prodex OpenAI sessions while excluding every running managed child.
+pub fn migrate_legacy_openai_provider(
+    codex_home: &Path,
+    explicit_path: Option<&Path>,
+) -> Result<prodex_session_store::ProviderIdentityMigration> {
+    prodex_session_store::migrate_legacy_openai_provider(codex_home, explicit_path, || {
+        let sessions = codex_home.join("sessions");
+        if let Ok(metadata) = fs::symlink_metadata(&sessions) {
+            anyhow::ensure!(
+                metadata.file_type().is_dir(),
+                "unsafe session lock directory"
+            );
+        }
+        let lock_path = sessions.join(CODEX_SESSION_MAINTENANCE_LOCK_FILE);
+        if let Ok(metadata) = fs::symlink_metadata(&lock_path) {
+            anyhow::ensure!(
+                metadata.file_type().is_file(),
+                "unsafe session maintenance lock"
+            );
+        }
+        try_lock_codex_session_maintenance(codex_home)
+    })
+}
+
 fn same_path(left: &Path, right: &Path) -> bool {
     normalize_path_for_compare(left) == normalize_path_for_compare(right)
 }

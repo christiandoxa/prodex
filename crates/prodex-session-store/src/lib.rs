@@ -5,6 +5,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod provider_identity;
 mod recent_workspaces;
 mod repair_candidates;
 mod repair_transaction;
@@ -16,6 +17,7 @@ mod session_root;
 mod session_selector;
 mod state_db_index;
 
+pub use provider_identity::{ProviderIdentityMigration, migrate_legacy_openai_provider};
 pub use recent_workspaces::collect_recent_session_workspaces;
 pub use report::{
     SessionReport, apply_session_json_line, apply_session_json_lines, apply_session_value,

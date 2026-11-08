@@ -34,7 +34,15 @@ pub(super) fn read_session_file_to_string(path: &Path) -> Result<String> {
     String::from_utf8(bytes).with_context(|| format!("failed to decode session {}", path.display()))
 }
 
-pub(super) fn visit_session_lines(path: &Path, mut visit: impl FnMut(&str) -> bool) -> Result<()> {
+pub(super) fn visit_session_lines(path: &Path, visit: impl FnMut(&str) -> bool) -> Result<()> {
+    visit_session_lines_limited(path, SESSION_STORE_FILE_MAX_BYTES, visit)
+}
+
+pub(super) fn visit_session_lines_limited(
+    path: &Path,
+    max_line_bytes: u64,
+    mut visit: impl FnMut(&str) -> bool,
+) -> Result<()> {
     let file = open_session_regular_file(path)?;
     let input: Box<dyn Read> = if is_compressed_session_file(path) {
         Box::new(zstd::stream::read::Decoder::new(file)?)
@@ -46,17 +54,17 @@ pub(super) fn visit_session_lines(path: &Path, mut visit: impl FnMut(&str) -> bo
     loop {
         line.clear();
         let read = (&mut reader)
-            .take(SESSION_STORE_FILE_MAX_BYTES.saturating_add(1))
+            .take(max_line_bytes.saturating_add(1))
             .read_line(&mut line)
             .with_context(|| format!("failed to read session {}", path.display()))?;
         if read == 0 {
             break;
         }
-        if read as u64 > SESSION_STORE_FILE_MAX_BYTES {
+        if read as u64 > max_line_bytes {
             bail!(
                 "session line {} exceeds safe size limit ({} bytes)",
                 path.display(),
-                SESSION_STORE_FILE_MAX_BYTES
+                max_line_bytes
             );
         }
         if !visit(&line) {

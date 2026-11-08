@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod large_files;
+mod provider_identity;
 mod repair;
 mod session_root;
 mod state_db;
