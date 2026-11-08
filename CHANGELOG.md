@@ -2,6 +2,69 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.167.2 - 2026-11-08
+
+### Misc
+
+- Stream large legacy histories and bound startup reads (`f6e8647`)
+# Prodex 0.167.2
+
+Fix delayed startup and unavailable-provider errors when resuming large saved
+conversations with Codex 0.167.0.
+
+## New Features
+
+Legacy OpenAI provider repair now supports large plain and compressed rollouts
+with streaming snapshots and atomic replacement instead of buffering the whole
+conversation. Indexed legacy sessions are prepared before the native picker
+opens, not just an arbitrary first batch of 32.
+
+## Bug Fixes
+
+- Remove repeated full-transcript scans from resume provider/model discovery,
+  workspace trust, valid metadata-prefix checks, and recovery initialization.
+- Read a bounded metadata header and complete-record tail for plain launch
+  metadata. Leave settings absent from that view to native Codex rather than
+  inventing a model or reasoning effort.
+- Remove the 64 MiB whole-rollout restriction from reserved provider migration
+  without increasing the memory ceiling for unrelated repair operations.
+- Preserve transcript bytes, UUIDs, ordinals, modification times, and native
+  pagination offsets. Fixed-width JSON whitespace keeps the metadata prefix
+  the same size while changing only the reserved provider identity.
+- Publish only complete durable provider backups. Interrupted staging copies
+  cannot become partial authoritative snapshots that poison a retry.
+- Retain generic historical rollout filenames, custom-provider routing,
+  compressed-session support, and strict duplicate-identity handling.
+
+## Compatibility and Upgrade
+
+The qualified native Codex version remains 0.167.0. RTK, Codebase Memory,
+Playwright MCP, and Ponytail remain automatic in Super; Presidio still asks
+for consent.
+
+Start a new runtime after updating. The first legacy conversion performs a
+one-time streamed copy and needs space for its backup and staged replacement.
+Keep the private `.prodex-provider-identity-bak` files until recovery is no
+longer needed. Do not delete session history or reset the native state database
+to work around a provider mismatch.
+
+Active writer/publication locks are respected. Busy sessions, conflicting
+backups, invalid metadata, or storage failures defer repair with a diagnostic
+rather than risking history loss. Unindexed discovery retains its bounded
+fallback while native backfill completes. Native Codex still owns the actual
+conversation replay after Prodex finishes its startup preparation.
+
+## Verification
+
+Regression coverage includes large plain/compressed history, exact backups,
+byte-offset preservation, partial records, cross-process writer contention,
+process termination before publication, and native UUID/picker resume flows.
+Native checks use isolated synthetic accounts and local model endpoints.
+
+## Changelog
+
+Full Changelog: [0.167.1...0.167.2](https://github.com/christiandoxa/prodex/compare/0.167.1...0.167.2)
+
 ## 0.167.1 - 2026-11-08
 
 ### Runtime
@@ -16,61 +79,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Flush retained backups with writable Windows handles (`db90906`)
 - Add bounded legacy OpenAI identity repair (`eb7cf48`)
-# Prodex 0.167.1
-
-Fix OpenAI session resume and proxy-based account discovery with Codex 0.167.0.
-
-## New Features
-
-Automatically prepare historical Prodex OpenAI sessions for native provider
-identity checks during local startup.
-
-## Bug Fixes
-
-- Keep the native `openai` provider identity when routing inference through
-  Prodex. Native OpenAI histories can continue through UUID resume and the
-  interactive `/resume` picker.
-- Repair the reserved historical `prodex-openai-governed-http` metadata and
-  matching native SQLite index using publication locks, a private exact backup,
-  and atomic replacement.
-- Restrict automatic proxy bypass for Codex backend URL overrides to loopback
-  hosts. External account-discovery origins use the configured upstream proxy.
-- Normalize IPv6 loopback bypass entries with valid host-port formatting.
-- Allow Windows to flush verified existing backups before session replacement.
-
-[Issue #123](https://github.com/christiandoxa/prodex/issues/123)
-
-## Compatibility
-
-- Preserve forced HTTP for governed and recursive sub-agent Responses launches
-  using a local transport marker and native Codex's HTTP 426 fallback.
-- Scope Observe fallback to marked launches so other clients sharing the
-  runtime daemon can use their existing WebSocket transport.
-- Qualify official tunnel-client 0.0.20 and isolate its ambient OAuth forwarding
-  configuration in the managed tunnel.
-- The release-qualified upstream Codex version is 0.167.0.
-
-## Upgrade
-
-Start a new Prodex runtime after upgrading. Legacy provider repair prioritizes
-an explicit resume UUID and attempts at most 32 sessions per launch. Busy
-sessions, files above the 64 MiB repair limit, and conflicting provider backups
-defer repair with a launch diagnostic. Large unindexed homes can need another
-launch after native index backfill completes.
-
-Each provider migration stores its exact original bytes in a private
-`.prodex-provider-identity-bak` file beside the rollout.
-
-## Verification
-
-Regression coverage exercises provider identity, scoped CLI overrides, proxy
-environment routing, native Responses fallback, index recovery, and
-cross-process writer contention. Isolated tests use official Codex 0.167.0
-with synthetic authentication and local HTTP/WebSocket services.
-
-## Changelog
-
-Full Changelog: [0.167.0...0.167.1](https://github.com/christiandoxa/prodex/compare/0.167.0...0.167.1)
 
 ## 0.167.0 - 2026-11-06
 
