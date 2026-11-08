@@ -101,10 +101,13 @@ pub(crate) fn migrate_legacy_openai_sessions_for_launch(
     {
         target = prodex_session_store::find_resume_session_path(root, id)?;
     }
+    crate::print_launch_status(
+        "preparing saved-session provider compatibility (preserving original history)...",
+    );
     let report = prodex_shared_codex_fs::migrate_legacy_openai_provider(root, target.as_deref())?;
     if report.deferred > 0 {
         crate::print_launch_status(&format!(
-            "provider compatibility repair deferred for {} saved session(s); retry this launch when sessions are idle",
+            "provider compatibility repair deferred for {} saved session(s); originals preserved. Close active writers and check storage or backup conflicts before retrying",
             report.deferred
         ));
     }

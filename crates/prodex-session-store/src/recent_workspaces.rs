@@ -75,7 +75,7 @@ fn collect_recent_workspace_candidates(
     Ok(candidates)
 }
 
-fn session_initial_cwd_from_path(path: &Path) -> Result<Option<PathBuf>> {
+pub(super) fn session_initial_cwd_from_path(path: &Path) -> Result<Option<PathBuf>> {
     let mut report = SessionReport::from_path(path, file_modified_epoch(path).unwrap_or(0));
     if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
         if !read_json_session_report(path, &mut report)? {

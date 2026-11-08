@@ -12,6 +12,9 @@ const REPAIR_LOCK_FILE: &str = ".prodex-session-repair.lock";
 const PRIVATE_FILE_MODE: u32 = 0o600;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+mod header;
+pub(super) use header::SessionHeaderRepair;
+
 pub(super) struct SessionRepairTransaction {
     path: PathBuf,
     parent: PathBuf,
@@ -26,24 +29,6 @@ impl SessionRepairTransaction {
     pub(super) fn begin(repository_root: &Path, path: &Path, max_bytes: u64) -> Result<Self> {
         let maintenance_lock = acquire_repository_lock(repository_root)?;
         Self::begin_with_lock(path, max_bytes, maintenance_lock)
-    }
-
-    pub(super) fn try_begin(
-        repository_root: &Path,
-        path: &Path,
-        max_bytes: u64,
-    ) -> Result<Option<Self>> {
-        require_directory(repository_root)?;
-        let lock_path = repository_root.join(REPAIR_LOCK_FILE);
-        let lock = open_lock_file(&lock_path)?;
-        match lock.try_lock() {
-            Ok(()) => {}
-            Err(fs::TryLockError::WouldBlock) => return Ok(None),
-            Err(error) => return Err(error).context("failed to acquire session repair lock"),
-        }
-        set_private_mode(&lock, &lock_path)?;
-        verify_named_file(&lock_path, &lock)?;
-        Self::begin_with_lock(path, max_bytes, lock).map(Some)
     }
 
     fn begin_with_lock(path: &Path, max_bytes: u64, maintenance_lock: File) -> Result<Self> {
@@ -103,11 +88,7 @@ impl SessionRepairTransaction {
     }
 
     pub(super) fn commit(self, repaired: &[u8]) -> Result<()> {
-        self.commit_inner(repaired, None, || {})
-    }
-
-    pub(super) fn commit_provider_identity(self, repaired: &[u8]) -> Result<()> {
-        self.commit_inner(repaired, Some("prodex-provider-identity-bak"), || {})
+        self.commit_inner(repaired, || {})
     }
 
     #[cfg(test)]
@@ -116,13 +97,12 @@ impl SessionRepairTransaction {
         repaired: &[u8],
         before_source_verification: impl FnOnce(),
     ) -> Result<()> {
-        self.commit_inner(repaired, None, before_source_verification)
+        self.commit_inner(repaired, before_source_verification)
     }
 
     fn commit_inner(
         self,
         repaired: &[u8],
-        exact_backup_suffix: Option<&str>,
         before_source_verification: impl FnOnce(),
     ) -> Result<()> {
         let Self {
@@ -135,7 +115,7 @@ impl SessionRepairTransaction {
             _maintenance_lock,
         } = self;
         verify_source(&path, &source, &source_revision)?;
-        let mut backup = ensure_backup(&path, &source_bytes, exact_backup_suffix)?;
+        let mut backup = ensure_backup(&path, &source_bytes)?;
 
         let result = (|| {
             let mut temporary = create_temporary_file(&path)?;
@@ -223,6 +203,20 @@ pub(super) fn repository_root(path: &Path) -> &Path {
         .unwrap_or(fallback)
 }
 
+fn try_repository_lock(root: &Path) -> Result<Option<File>> {
+    require_directory(root)?;
+    let path = root.join(REPAIR_LOCK_FILE);
+    let lock = open_lock_file(&path)?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(fs::TryLockError::WouldBlock) => return Ok(None),
+        Err(error) => return Err(error).context("failed to acquire session repair lock"),
+    }
+    set_private_mode(&lock, &path)?;
+    verify_named_file(&path, &lock)?;
+    Ok(Some(lock))
+}
+
 fn acquire_repository_lock(root: &Path) -> Result<File> {
     require_directory(root)?;
     let path = root.join(REPAIR_LOCK_FILE);
@@ -287,20 +281,8 @@ pub(super) fn try_native_publication_locks(root: &Path, id: &str) -> Result<Opti
     Ok(Some(locks))
 }
 
-fn ensure_backup(
-    path: &Path,
-    contents: &[u8],
-    exact_backup_suffix: Option<&str>,
-) -> Result<Option<CreatedPrivateFile>> {
-    let backup_path = match exact_backup_suffix {
-        Some(suffix) => path.with_extension(format!(
-            "{}.{suffix}",
-            path.extension()
-                .and_then(|extension| extension.to_str())
-                .unwrap_or("session")
-        )),
-        None => backup_path(path),
-    };
+fn ensure_backup(path: &Path, contents: &[u8]) -> Result<Option<CreatedPrivateFile>> {
+    let backup_path = backup_path(path);
     match CreatedPrivateFile::create(&backup_path) {
         Ok(mut backup) => {
             backup
@@ -323,21 +305,7 @@ fn ensure_backup(
                 || backup_path.try_exists().unwrap_or(false) =>
         {
             // Windows FlushFileBuffers requires write access even for a retained snapshot.
-            let (backup, metadata) = open_regular_file(&backup_path, cfg!(windows))?;
-            if exact_backup_suffix.is_some() {
-                anyhow::ensure!(
-                    metadata.len() == contents.len() as u64,
-                    "provider backup differs from current session"
-                );
-                let mut existing = Vec::new();
-                (&backup)
-                    .take(contents.len() as u64 + 1)
-                    .read_to_end(&mut existing)?;
-                anyhow::ensure!(
-                    existing == contents,
-                    "provider backup differs from current session"
-                );
-            }
+            let (backup, _) = open_regular_file(&backup_path, cfg!(windows))?;
             set_private_mode(&backup, &backup_path)?;
             backup
                 .sync_all()

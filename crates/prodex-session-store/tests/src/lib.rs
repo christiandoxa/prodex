@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod large_files;
 mod provider_identity;
 mod repair;
+mod resume_metadata;
 mod session_root;
 mod state_db;
 mod state_db_targeted;

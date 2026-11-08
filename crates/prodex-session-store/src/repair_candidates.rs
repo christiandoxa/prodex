@@ -8,6 +8,10 @@ pub(super) fn oversized_session_already_repaired(path: &Path, selector: &str) ->
     {
         return Ok(false);
     }
+    native_metadata_prefix_matches(path, selector)
+}
+
+fn native_metadata_prefix_matches(path: &Path, selector: &str) -> Result<bool> {
     let mut first_line_is_matching_codex_metadata = false;
     visit_session_lines(path, |line| {
         if line.trim().is_empty() {
@@ -95,12 +99,18 @@ pub(super) fn repair_session_candidate(
     selector: &str,
 ) -> Result<bool> {
     let repair_selector = candidate.resolved_session_id.as_deref().unwrap_or(selector);
-    let repaired = repair_session_file_metadata_prefix(
-        shared_codex_root,
-        &candidate.path,
-        repair_selector,
-        true,
-    )?;
+    // Startup owns the metadata prefix, not a second replay of all native history.
+    // This also handles a small compressed file with a multi-GiB decoded transcript.
+    let repaired = if native_metadata_prefix_matches(&candidate.path, repair_selector)? {
+        false
+    } else {
+        repair_session_file_metadata_prefix(
+            shared_codex_root,
+            &candidate.path,
+            repair_selector,
+            true,
+        )?
+    };
     let _ = repair_state_db_rollout_path(shared_codex_root, &candidate.path)?;
     Ok(repaired)
 }

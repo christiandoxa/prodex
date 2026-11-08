@@ -585,13 +585,27 @@ matching SQLite index identity. It uses shared session maintenance and native
 publication locks, a private `.prodex-provider-identity-bak` snapshot, atomic
 rollout replacement, and compare-and-swap index updates.
 
-Each launch attempts at most 32 repairs and prioritizes an explicit resume
-UUID. Candidate discovery uses the native provider index. While native backfill
-is incomplete, a fallback examines at most 512 active directory entries.
-Discovery and repair check a two-second budget between operations, and each
-transaction has a 64 MiB size limit. Busy sessions, oversized files, and
-conflicting provider backups defer repair with a launch diagnostic. A large
-unindexed home can need another launch after native backfill completes.
+An explicit resume UUID is prioritized, and all eligible indexed legacy identities
+are prepared before the native picker opens; an arbitrary first batch must not
+leave selectable chats with an unavailable provider. Unindexed discovery still
+examines at most 512 active directory entries within a bounded discovery budget.
+Provider repair streams plain or compressed history through a private snapshot
+and atomic replacement, without a whole-rollout memory/size limit. The metadata
+header retains its 1 MiB validation limit. JSON whitespace preserves header
+width and native pagination byte offsets. Backups are published atomically
+only after a complete durable copy. Existing transcript bytes (decoded
+bytes for compressed rollouts), UUIDs, and modification time are preserved.
+Busy sessions and conflicting backups are deferred without changing history;
+active writer/publication locks are never bypassed. A large unindexed home can
+need native backfill to complete before every old chat is discovered.
+
+Resume startup reads the metadata header and at most an 8 MiB complete-record
+tail of a plain rollout, rather than repeatedly parsing tool output and images.
+An incomplete trailing record is ignored. Compressed launch metadata uses its
+header, leaving persisted turn settings to native Codex. Settings absent from a
+bounded read are not invented or recovered by an unbounded history scan. The
+ordinary session-report API keeps its full-history semantics. Initial workspace
+trust and recovery cursors likewise avoid a full transcript replay.
 
 Normal interactive launch and shutdown do not start an auxiliary `app-server`
 and do not paginate historical threads. Prodex keeps the normal path bounded to

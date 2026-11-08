@@ -41,9 +41,18 @@ pub(super) fn visit_session_lines(path: &Path, visit: impl FnMut(&str) -> bool) 
 pub(super) fn visit_session_lines_limited(
     path: &Path,
     max_line_bytes: u64,
-    mut visit: impl FnMut(&str) -> bool,
+    visit: impl FnMut(&str) -> bool,
 ) -> Result<()> {
     let file = open_session_regular_file(path)?;
+    visit_open_session_lines_limited(path, file, max_line_bytes, visit)
+}
+
+pub(super) fn visit_open_session_lines_limited(
+    path: &Path,
+    file: fs::File,
+    max_line_bytes: u64,
+    mut visit: impl FnMut(&str) -> bool,
+) -> Result<()> {
     let input: Box<dyn Read> = if is_compressed_session_file(path) {
         Box::new(zstd::stream::read::Decoder::new(file)?)
     } else {
@@ -201,7 +210,7 @@ fn visit_session_lines_from_reader<R: Read>(
     }
 }
 
-fn is_compressed_session_file(path: &Path) -> bool {
+pub(super) fn is_compressed_session_file(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         // Non-UTF-8 file names stay owned by the OS-aware Rust host.
         return false;
@@ -210,7 +219,7 @@ fn is_compressed_session_file(path: &Path) -> bool {
         .expect("compiled Mojo session compression suffix classification failed")
 }
 
-fn open_session_regular_file(path: &Path) -> Result<fs::File> {
+pub(super) fn open_session_regular_file(path: &Path) -> Result<fs::File> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("failed to inspect session {}", path.display()))?;
     if metadata.file_type().is_symlink() {

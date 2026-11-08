@@ -200,7 +200,7 @@ impl GoalUsageLimitMonitor {
             return Ok(None);
         };
         let state = AppState::load_and_repair(&self.paths)?;
-        let report = match prodex_session_store::resolve_session_report_by_id_in_store(
+        let report = match prodex_session_store::resolve_resume_launch_report(
             &self.paths.shared_codex_root,
             &state,
             &session_id,
@@ -368,7 +368,7 @@ impl GoalUsageLimitMonitor {
         let Ok(state) = AppState::load_and_repair(&self.paths) else {
             return 0;
         };
-        prodex_session_store::resolve_session_report_by_id_in_store(
+        prodex_session_store::resolve_resume_launch_report(
             &self.paths.shared_codex_root,
             &state,
             session_id,
@@ -443,7 +443,7 @@ pub(crate) fn prepare_runtime_usage_limit_monitor(
     }
     let session_id = prodex_runtime_launch::codex_resume_session_id(codex_args)
         .map(|selector| {
-            prodex_session_store::resolve_session_report_by_id_in_store(
+            prodex_session_store::resolve_resume_launch_report(
                 &paths.shared_codex_root,
                 &state,
                 selector,

@@ -117,7 +117,7 @@ impl GoalUsageLimitMonitor {
             return Ok(Some(path.clone()));
         }
         let state = AppState::load_and_repair(&self.paths)?;
-        let report = match prodex_session_store::resolve_session_report_by_id_in_store(
+        let report = match prodex_session_store::resolve_resume_launch_report(
             &self.paths.shared_codex_root,
             &state,
             session_id,

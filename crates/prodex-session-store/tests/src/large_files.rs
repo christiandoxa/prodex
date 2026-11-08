@@ -48,3 +48,24 @@ fn session_reports_reject_oversized_session_line() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn resume_prefix_check_does_not_decode_large_compressed_history() {
+    let root = test_temp_dir("session-large-compressed-prefix");
+    let sessions = root.join("sessions");
+    fs::create_dir_all(&sessions).unwrap();
+    let id = "01900000-0000-7000-8000-000000000901";
+    let path = sessions.join(format!("rollout-{id}.jsonl.zst"));
+    let raw = format!(
+        "{{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{id}\",\"timestamp\":\"2026-01-01T00:00:00Z\",\"cwd\":\"/home/test-user/project\",\"originator\":\"codex-cli\",\"cli_version\":\"0.167.0\"}}}}\n{}\n",
+        " ".repeat(SESSION_STORE_FILE_MAX_BYTES as usize * 3)
+    );
+    let encoded = zstd::stream::encode_all(raw.as_bytes(), 1).unwrap();
+    fs::write(&path, &encoded).unwrap();
+    assert_eq!(
+        repair_resume_session_metadata_prefix(&root, id).unwrap(),
+        None
+    );
+    assert_eq!(fs::read(&path).unwrap(), encoded);
+    fs::remove_dir_all(root).unwrap();
+}

@@ -11,6 +11,7 @@ mod repair_candidates;
 mod repair_transaction;
 mod report;
 mod resolve_error;
+mod resume_metadata;
 mod session_file;
 mod session_meta;
 mod session_root;
@@ -25,6 +26,7 @@ pub use report::{
     sort_session_reports, timestamp_label_sort_key, value_at_path,
 };
 pub use resolve_error::*;
+pub use resume_metadata::{collect_resume_launch_reports, resolve_resume_launch_report};
 pub use session_root::{SessionResumeTarget, resolve_native_resume_target, resolve_session_root};
 
 use repair_candidates::{
@@ -299,16 +301,7 @@ pub fn repair_resume_session_metadata_prefix(
 
 /// Finds a valid exact rollout path without changing the session file.
 pub fn session_cwd_from_path(path: &Path) -> Result<Option<PathBuf>> {
-    let mut report = SessionReport::from_path(path, file_modified_epoch(path).unwrap_or(0));
-    let valid = if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
-        read_json_session_report(path, &mut report)?
-    } else {
-        read_jsonl_session_report(path, &mut report)?
-    };
-    if !valid {
-        return Ok(None);
-    }
-    Ok(report.cwd.map(PathBuf::from))
+    recent_workspaces::session_initial_cwd_from_path(path)
 }
 
 pub fn find_resume_session_path(

@@ -66,7 +66,7 @@ fn runtime_resume_session_report_from_codex_args(
     let state = AppState::load(&paths)?;
     let report =
         if let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(&normalized) {
-            match prodex_session_store::resolve_session_report_by_id_in_store(
+            match prodex_session_store::resolve_resume_launch_report(
                 &paths.shared_codex_root,
                 &state,
                 session_id,
@@ -81,7 +81,7 @@ fn runtime_resume_session_report_from_codex_args(
             let current_dir = (!codex_resume_all(&normalized))
                 .then(std::env::current_dir)
                 .transpose()?;
-            select_resume_last_report(prodex_session_store::collect_session_reports_with_filter(
+            select_resume_last_report(prodex_session_store::collect_resume_launch_reports(
                 &paths.shared_codex_root,
                 prodex_session_store::SessionReportFilter {
                     current_dir: current_dir.as_deref(),

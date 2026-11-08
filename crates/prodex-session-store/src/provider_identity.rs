@@ -1,11 +1,11 @@
 //! Retire only Prodex's historical transport alias while preserving native provider identity.
-use super::repair_transaction::{SessionRepairTransaction, try_native_publication_locks};
+use super::repair_transaction::{SessionHeaderRepair, try_native_publication_locks};
 use super::session_file::visit_session_lines_limited;
 use super::state_db_index::{
     is_codex_state_db_path, path_is_contained_regular_file, persistent_overlay_candidates,
     resolve_state_db_rollout_path,
 };
-use super::{SESSION_STORE_FILE_MAX_BYTES, full_codex_session_id, is_session_metadata_file};
+use super::{full_codex_session_id, is_session_metadata_file};
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OpenFlags};
 use std::collections::BTreeSet;
@@ -39,7 +39,8 @@ struct Header {
 
 /// Uses indexed reserved aliases first. The bounded active-directory fallback is needed only
 /// before native backfill completes; archive discovery stays owned by the native session index.
-/// The deadline is checked between operations; each transaction retains the existing size limit.
+/// Indexed legacy identities are completed in this launch: a deferred arbitrary batch leaves
+/// the native /resume picker selecting unprepared histories. Only unindexed discovery is capped.
 pub fn migrate_legacy_openai_provider(
     root: &Path,
     explicit_path: Option<&Path>,
@@ -79,9 +80,6 @@ pub fn migrate_legacy_openai_provider(
         .collect::<Vec<_>>();
     let mut backfill_complete = false;
     for (index, path) in databases.iter().enumerate() {
-        if started.elapsed() >= LAUNCH_BUDGET / 2 || candidates.len() > MAX_CANDIDATES {
-            break;
-        }
         let Ok(connection) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         else {
             continue;
@@ -89,7 +87,7 @@ pub fn migrate_legacy_openai_provider(
         connection.busy_timeout(Duration::ZERO)?;
         // Native maintains this index. Avoid a whole threads-table scan in older/incomplete DBs.
         let Ok(mut query) = connection.prepare(
-            "SELECT id, rollout_path FROM threads INDEXED BY idx_threads_provider WHERE model_provider = ?1 LIMIT ?2",
+            "SELECT id, rollout_path FROM threads INDEXED BY idx_threads_provider WHERE model_provider = ?1",
         ) else {
             continue;
         };
@@ -102,14 +100,10 @@ pub fn migrate_legacy_openai_provider(
                 )
                 .is_ok_and(|status| status == "complete");
         }
-        let rows = query.query_map(
-            rusqlite::params![LEGACY_PROVIDER, (MAX_CANDIDATES + 1) as i64],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )?;
+        let rows = query.query_map(rusqlite::params![LEGACY_PROVIDER], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
         for (id, rollout_path) in rows.flatten() {
-            if started.elapsed() >= LAUNCH_BUDGET / 2 || candidates.len() > MAX_CANDIDATES {
-                break;
-            }
             let Some(id) = full_codex_session_id(id.strip_prefix("thread_").unwrap_or(&id)) else {
                 continue;
             };
@@ -145,11 +139,7 @@ pub fn migrate_legacy_openai_provider(
         report.deferred = candidates.len();
         return Ok(report);
     };
-    for (attempt, candidate) in candidates.into_iter().enumerate() {
-        if attempt >= MAX_CANDIDATES || started.elapsed() >= LAUNCH_BUDGET {
-            report.deferred += 1;
-            continue;
-        }
+    for candidate in candidates {
         match migrate_candidate(root, &candidate, &databases) {
             Ok(true) => report.repaired += 1,
             Ok(false) | Err(_) => report.deferred += 1,
@@ -273,43 +263,12 @@ fn migrate_candidate(root: &Path, candidate: &Candidate, databases: &[PathBuf]) 
         return Ok(false);
     };
     let Some(transaction) =
-        SessionRepairTransaction::try_begin(root, &candidate.path, SESSION_STORE_FILE_MAX_BYTES)?
+        SessionHeaderRepair::try_begin(root, &candidate.path, MAX_HEADER_BYTES)?
     else {
         return Ok(false);
     };
-    let raw = transaction.contents();
-    let mut offset = 0;
-    let line = raw
-        .split_inclusive('\n')
-        .find(|line| {
-            if line.trim().is_empty() {
-                offset += line.len();
-                false
-            } else {
-                true
-            }
-        })
-        .context("missing metadata")?;
-    let header = parse_header(line, offset)?;
-    ensure!(
-        header.id == candidate.id,
-        "indexed session identity disagrees"
-    );
-    ensure!(
-        matches!(header.provider.as_str(), LEGACY_PROVIDER | "openai"),
-        "provider changed"
-    );
-    if header.provider == LEGACY_PROVIDER {
-        let mut repaired = raw.to_string();
-        repaired.replace_range(header.provider_span.clone(), "\"openai\"");
-        let repaired_line_end =
-            offset + line.len() - header.provider_span.len() + "\"openai\"".len();
-        let replacement = parse_header(&repaired[offset..repaired_line_end], offset)?;
-        ensure!(
-            replacement.id == header.id && replacement.provider == "openai",
-            "ambiguous provider metadata"
-        );
-        transaction.commit_provider_identity(repaired.as_bytes())?;
+    if let Some(repaired) = canonical_provider_header(transaction.prefix(), &candidate.id)? {
+        transaction.commit(repaired.as_bytes())?;
     }
     for database in databases {
         ensure!(
@@ -350,4 +309,47 @@ fn migrate_candidate(root: &Path, candidate: &Candidate, databases: &[PathBuf]) 
         }
     }
     Ok(true)
+}
+
+fn canonical_provider_header(raw: &str, expected_id: &str) -> Result<Option<String>> {
+    let mut offset = 0;
+    let line = raw
+        .split_inclusive('\n')
+        .find(|line| {
+            if line.trim().is_empty() {
+                offset += line.len();
+                false
+            } else {
+                true
+            }
+        })
+        .context("missing metadata")?;
+    let header = parse_header(line, offset)?;
+    ensure!(
+        header.id == expected_id,
+        "indexed session identity disagrees"
+    );
+    ensure!(
+        matches!(header.provider.as_str(), LEGACY_PROVIDER | "openai"),
+        "provider changed"
+    );
+    if header.provider == "openai" {
+        return Ok(None);
+    }
+    let mut repaired = raw.to_string();
+    // Native paginated history persists byte offsets. Preserve the prefix width
+    // with JSON whitespace so every existing transcript offset remains valid.
+    let replacement = format!(
+        "{:<width$}",
+        "\"openai\"",
+        width = header.provider_span.len()
+    );
+    repaired.replace_range(header.provider_span.clone(), &replacement);
+    let end = offset + line.len();
+    let replacement = parse_header(&repaired[offset..end], offset)?;
+    ensure!(
+        replacement.id == header.id && replacement.provider == "openai",
+        "ambiguous provider metadata"
+    );
+    Ok(Some(repaired))
 }

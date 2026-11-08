@@ -4,6 +4,14 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 const ALIAS: &str = "prodex-openai-governed-http";
+
+fn canonical_history(raw: &str) -> String {
+    raw.replacen(
+        &format!("\"{ALIAS}\""),
+        &format!("{:<width$}", "\"openai\"", width = ALIAS.len() + 2),
+        1,
+    )
+}
 const ID: &str = "01900000-0000-7000-8000-000000000501";
 const OTHER_ID: &str = "01900000-0000-7000-8000-000000000502";
 
@@ -78,10 +86,7 @@ fn provider_migration_changes_only_reserved_metadata_and_updates_native_index() 
             deferred: 0
         }
     );
-    assert_eq!(
-        fs::read_to_string(&path).unwrap(),
-        raw.replacen(&format!("\"{ALIAS}\""), "\"openai\"", 1)
-    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), canonical_history(&raw));
     assert_eq!(
         fs::read(path.with_extension("jsonl.prodex-provider-identity-bak")).unwrap(),
         raw.as_bytes()
@@ -198,7 +203,7 @@ fn provider_migration_recovers_promoted_overlay_index_without_history_scan() {
 }
 
 #[test]
-fn provider_migration_prioritizes_explicit_target_and_bounds_indexed_batch() {
+fn provider_migration_prepares_all_indexed_targets_for_the_native_picker() {
     let root = test_temp_dir("provider-migration-batch");
     let (explicit, _) = rollout(&root, "archived_sessions", OTHER_ID, ALIAS);
     let connection = index(&root, "complete");
@@ -208,8 +213,13 @@ fn provider_migration_prioritizes_explicit_target_and_bounds_indexed_batch() {
         insert(&connection, &id, &path, ALIAS);
     }
     let report = migrate(&root, Some(&explicit));
-    assert!((1..=32).contains(&report.repaired));
-    assert!(report.deferred >= 1);
+    assert_eq!(
+        report,
+        ProviderIdentityMigration {
+            repaired: 41,
+            deferred: 0
+        }
+    );
     assert!(
         fs::read_to_string(explicit)
             .unwrap()
@@ -222,7 +232,7 @@ fn provider_migration_prioritizes_explicit_target_and_bounds_indexed_batch() {
             |row| row.get(0),
         )
         .unwrap();
-    assert!(remaining >= 9);
+    assert_eq!(remaining, 0);
     drop(connection);
     fs::remove_dir_all(root).unwrap();
 }
@@ -241,11 +251,7 @@ fn provider_migration_compressed_backup_preserves_original_bytes() {
         compressed
     );
     let decoded = zstd::stream::decode_all(fs::read(path).unwrap().as_slice()).unwrap();
-    assert_eq!(
-        decoded,
-        raw.replacen(&format!("\"{ALIAS}\""), "\"openai\"", 1)
-            .as_bytes()
-    );
+    assert_eq!(decoded, canonical_history(&raw).as_bytes());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -334,7 +340,7 @@ fn provider_migration_defers_native_writers_and_busy_repair_without_waiting() {
 }
 
 #[test]
-fn provider_migration_defers_shared_children_and_oversized_rollouts() {
+fn provider_migration_defers_contended_maintenance_and_streams_oversized_rollouts() {
     let root = test_temp_dir("provider-migration-deferred");
     let (path, raw) = rollout(&root, "sessions", ID, ALIAS);
     assert_eq!(
@@ -350,15 +356,17 @@ fn provider_migration_defers_shared_children_and_oversized_rollouts() {
     assert_eq!(
         migrate(&root, Some(&path)),
         ProviderIdentityMigration {
-            repaired: 0,
-            deferred: 1
+            repaired: 1,
+            deferred: 0
         }
     );
-    assert_eq!(fs::read_to_string(&path).unwrap(), oversized);
-    assert!(
-        !path
-            .with_extension("jsonl.prodex-provider-identity-bak")
-            .exists()
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        canonical_history(&oversized)
+    );
+    assert_eq!(
+        fs::read_to_string(path.with_extension("jsonl.prodex-provider-identity-bak")).unwrap(),
+        oversized
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -461,5 +469,193 @@ fn provider_migration_recovers_after_busy_sqlite_writer() {
     );
     assert_eq!(indexed_provider(&connection, ID), "openai");
     drop(connection);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn provider_migration_streams_large_history_without_changing_transcript() {
+    let root = test_temp_dir("provider-migration-streamed-history");
+    let (path, raw) = rollout(&root, "sessions", ID, ALIAS);
+    let raw = format!(
+        "{raw}{}\n",
+        " ".repeat(SESSION_STORE_FILE_MAX_BYTES as usize * 3)
+    );
+    fs::write(&path, &raw).unwrap();
+    let connection = index(&root, "complete");
+    insert(&connection, ID, &path, ALIAS);
+    let before_time = fs::metadata(&path).unwrap().modified().unwrap();
+    assert_eq!(
+        migrate(&root, Some(&path)),
+        ProviderIdentityMigration {
+            repaired: 1,
+            deferred: 0
+        }
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), canonical_history(&raw));
+    assert_eq!(
+        fs::read_to_string(path.with_extension("jsonl.prodex-provider-identity-bak")).unwrap(),
+        raw
+    );
+    assert_eq!(fs::metadata(&path).unwrap().len(), raw.len() as u64);
+    assert_eq!(
+        fs::metadata(&path).unwrap().modified().unwrap(),
+        before_time
+    );
+    assert_eq!(indexed_provider(&connection, ID), "openai");
+    drop(connection);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn streamed_provider_repair_preserves_concurrent_append_and_cleans_temporary_files() {
+    let root = test_temp_dir("provider-migration-streamed-append");
+    let (path, raw) = rollout(&root, "sessions", ID, ALIAS);
+    let transaction = repair_transaction::SessionHeaderRepair::try_begin(&root, &path, 1024 * 1024)
+        .unwrap()
+        .unwrap();
+    let prefix = transaction
+        .prefix()
+        .replacen(&format!("\"{ALIAS}\""), "\"openai\"", 1);
+    let appended = b"{\"type\":\"event_msg\",\"payload\":{\"message\":\"concurrent writer\"}}\n";
+    let result = transaction.commit_after_prepare(prefix.as_bytes(), || {
+        File::options()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(appended)
+            .unwrap();
+    });
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        [raw.as_bytes(), appended].concat()
+    );
+    let names = fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        !names.iter().any(
+            |name| name.contains("prodex-repair-tmp") || name.contains("provider-identity-bak")
+        )
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn provider_migration_streams_large_compressed_history_and_retains_encoded_backup() {
+    let root = test_temp_dir("provider-migration-large-compressed");
+    let (plain, raw) = rollout(&root, "sessions", ID, ALIAS);
+    let raw = format!(
+        "{raw}{}\n",
+        " ".repeat(SESSION_STORE_FILE_MAX_BYTES as usize * 3)
+    );
+    let path = plain.with_extension("jsonl.zst");
+    let encoded = zstd::stream::encode_all(raw.as_bytes(), 1).unwrap();
+    fs::write(&path, &encoded).unwrap();
+    fs::remove_file(plain).unwrap();
+    assert_eq!(
+        migrate(&root, Some(&path)),
+        ProviderIdentityMigration {
+            repaired: 1,
+            deferred: 0
+        }
+    );
+    assert_eq!(
+        fs::read(path.with_extension("zst.prodex-provider-identity-bak")).unwrap(),
+        encoded
+    );
+    assert_eq!(
+        zstd::stream::decode_all(File::open(&path).unwrap()).unwrap(),
+        canonical_history(&raw).as_bytes()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn interrupted_staging_copy_does_not_poison_provider_backup_retry() {
+    let root = test_temp_dir("provider-backup-staging-retry");
+    let (path, raw) = rollout(&root, "sessions", ID, ALIAS);
+    let leftover =
+        path.with_extension("jsonl.prodex-provider-identity-bak.prodex-repair-tmp-interrupted");
+    fs::write(&leftover, &raw.as_bytes()[..raw.len() / 2]).unwrap();
+    assert_eq!(
+        migrate(&root, Some(&path)),
+        ProviderIdentityMigration {
+            repaired: 1,
+            deferred: 0
+        }
+    );
+    assert_eq!(
+        fs::read(path.with_extension("jsonl.prodex-provider-identity-bak")).unwrap(),
+        raw.as_bytes()
+    );
+    // Unknown staging owners are not deleted by a launch-time history repair.
+    assert_eq!(
+        fs::read(&leftover).unwrap(),
+        raw.as_bytes()[..raw.len() / 2]
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn hold_streamed_provider_publication() {
+    let Some(root) = std::env::var_os("PRODEX_TEST_HEADER_REPAIR_ROOT").map(PathBuf::from) else {
+        return;
+    };
+    let path = root.join("sessions").join(format!("rollout-{ID}.jsonl"));
+    let transaction = repair_transaction::SessionHeaderRepair::try_begin(&root, &path, 1024 * 1024)
+        .unwrap()
+        .unwrap();
+    let prefix = canonical_history(transaction.prefix());
+    transaction
+        .commit_after_prepare(prefix.as_bytes(), || {
+            fs::write(root.join("staged.ready"), b"ready").unwrap();
+            let mut release = [0_u8];
+            let _ = std::io::Read::read_exact(&mut std::io::stdin(), &mut release);
+        })
+        .unwrap();
+}
+
+#[test]
+fn provider_migration_recovers_after_process_termination_before_publication() {
+    let root = test_temp_dir("provider-migration-terminated-publication");
+    let (path, raw) = rollout(&root, "sessions", ID, ALIAS);
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::provider_identity::hold_streamed_provider_publication",
+            "--nocapture",
+        ])
+        .env("PRODEX_TEST_HEADER_REPAIR_ROOT", &root)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !root.join("staged.ready").exists() && Instant::now() < deadline {
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "publication helper exited early"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let ready = root.join("staged.ready").exists();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(ready, "publication helper did not reach durable staging");
+    assert_eq!(fs::read(&path).unwrap(), raw.as_bytes());
+    assert_eq!(
+        fs::read(path.with_extension("jsonl.prodex-provider-identity-bak")).unwrap(),
+        raw.as_bytes()
+    );
+    assert_eq!(
+        migrate(&root, Some(&path)),
+        ProviderIdentityMigration {
+            repaired: 1,
+            deferred: 0
+        }
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), canonical_history(&raw));
     fs::remove_dir_all(root).unwrap();
 }
