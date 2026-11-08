@@ -456,7 +456,10 @@ fn persist_runtime_state_selected_snapshot_save(
 
 #[cfg(test)]
 mod local_resume_tests {
-    use super::*;
+    use super::{
+        AppState, BTreeMap, ResponseProfileBinding, RuntimeContinuationStore,
+        rewrite_unavailable_profile_bindings, rewrite_unavailable_state_bindings,
+    };
     #[test]
     fn local_resume_snapshot_keeps_profileless_identity_but_not_deleted_named_profiles() {
         let identity =

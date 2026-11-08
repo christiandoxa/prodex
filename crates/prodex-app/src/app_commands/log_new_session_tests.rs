@@ -1,4 +1,5 @@
-use super::*;
+use super::{FollowedLog, collect_new_followed_lines};
+use std::fs;
 
 #[test]
 fn newly_discovered_session_replays_complete_reasoning_tail_once() {

@@ -50,7 +50,17 @@ pub(super) fn send_local_chat_request(
             gemini_context: None, copilot_context: None,
         });
     }
-    let conversations = shared.deepseek_conversations_for_request(request);
+    // Codex replays a complete transcript on stateless local turns. Looking up an
+    // old tool-call cache as well re-inserts reasoning after the tool results,
+    // producing an invalid assistant-prefill tail in llama.cpp templates.
+    // Delta-only tool replies and opaque response continuations still need their cache.
+    let conversations = if is_local_chat_history_replay(shared, request)
+        && local_chat_input_is_self_contained(&value)
+    {
+        super::deepseek_rewrite::RuntimeDeepSeekConversationStore::default()
+    } else {
+        shared.deepseek_conversations_for_request(request)
+    };
     let mut local_request = value.clone();
     let parallel =
         prodex_provider_core::provider_core_local_chat_parallel_control(&mut local_request)
@@ -148,4 +158,41 @@ pub(super) fn is_local_chat_history_replay(
         return false;
     };
     prodex_mojo_core::json::local_model_uses_chat_completions(&model).unwrap_or(false)
+}
+
+/// The compiled classifier owns input kinds; this host check only decides whether
+/// persisted tool-call cache lookup is necessary for the supplied JSON records.
+fn local_chat_input_is_self_contained(value: &serde_json::Value) -> bool {
+    use prodex_mojo_core::rich::{DeepSeekReplayItemKind, deepseek_replay_item_kind};
+    let Some(input) = value.get("input") else {
+        return false;
+    };
+    if input.is_string() {
+        return true;
+    }
+    let Some(items) = input.as_array() else {
+        return false;
+    };
+    let mut calls = std::collections::BTreeSet::new();
+    let mut outputs = Vec::new();
+    for item in items {
+        let id = item
+            .get("call_id")
+            .or_else(|| item.get("tool_call_id"))
+            .or_else(|| item.get("id"))
+            .and_then(serde_json::Value::as_str);
+        match deepseek_replay_item_kind(item.get("type").and_then(serde_json::Value::as_str)) {
+            Ok(DeepSeekReplayItemKind::Call | DeepSeekReplayItemKind::McpCall) => {
+                if let Some(id) = id {
+                    calls.insert(id);
+                }
+            }
+            Ok(DeepSeekReplayItemKind::Output) => outputs.push(id),
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+    }
+    outputs
+        .into_iter()
+        .all(|id| id.is_some_and(|id| calls.contains(id)))
 }

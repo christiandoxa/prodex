@@ -575,7 +575,25 @@ mod tests {
             "data: {\"type\":\"message_stop\"}\n\n",
         ));
 
-        let deltas = data_values(&output)
+        let events = data_values(&output);
+        // Anthropic block index 2 is not a Responses output-array index. The
+        // single translated item occupies slot 0 in added/delta/done/completed.
+        let added = events
+            .iter()
+            .find(|event| event["type"] == "response.output_item.added")
+            .unwrap();
+        let done = events
+            .iter()
+            .find(|event| event["type"] == "response.output_item.done")
+            .unwrap();
+        assert_eq!(added["output_index"], 0);
+        assert_eq!(done["output_index"], 0);
+        assert_eq!(added["item"]["id"], done["item"]["id"]);
+        assert_eq!(
+            events.last().unwrap()["response"]["output"][0]["call_id"],
+            "call_fragments"
+        );
+        let deltas = events
             .into_iter()
             .filter(|value| value["type"] == "response.function_call_arguments.delta")
             .collect::<Vec<_>>();
@@ -589,9 +607,9 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             vec![
-                ("call_fragments", 2, "{"),
-                ("call_fragments", 2, "\"text\":\"é"),
-                ("call_fragments", 2, "\"}")
+                ("call_fragments", 0, "{"),
+                ("call_fragments", 0, "\"text\":\"é"),
+                ("call_fragments", 0, "\"}")
             ]
         );
         assert!(

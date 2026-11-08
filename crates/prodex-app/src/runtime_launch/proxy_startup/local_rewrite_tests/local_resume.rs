@@ -1,7 +1,11 @@
-use super::*;
+use super::{
+    AppState, RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
+    TestUpstream, app_paths_for_root, start_runtime_local_rewrite_proxy, temp_root,
+};
 use crate::AppStateIoExt;
 use prodex_state::ResponseProfileBinding;
 use serde_json::json;
+use std::{fs, time::Duration};
 
 const SESSION: &str = "01900000-0000-7000-8000-000000000901";
 const CHAT: &str = r#"{"id":"chatcmpl_resume_fixture","object":"chat.completion","model":"offrail-27b","choices":[{"index":0,"message":{"role":"assistant","content":"RESUMED_OK"},"finish_reason":"stop"}]}"#;
@@ -146,4 +150,79 @@ fn local_resume_replays_native_reasoning_with_custom_tool_results() {
             .iter()
             .any(|item| item["role"] == "tool" && item["content"] == "Success")
     );
+}
+
+#[test]
+fn local_resume_full_transcript_does_not_append_cached_reasoning_after_tool_results() {
+    let paths = app_paths_for_root(temp_root("local-replay-reasoning-order"));
+    let chat = r#"{"id":"chatcmpl_cached_fixture","object":"chat.completion","model":"offrail-27b","choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"Inspect the fixture.","tool_calls":[{"id":"call_fixture","type":"function","function":{"name":"read_file","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#;
+    let upstream = TestUpstream::start_with_responses(vec![200; 3], "application/json", chat);
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            local: true,
+            api_keys: Vec::new(),
+        },
+        upstream_no_proxy: true,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: Some(169984),
+        preferred_listen_addr: Some("127.0.0.1:0"),
+    })
+    .unwrap();
+    let send = |input: serde_json::Value| {
+        let response = reqwest::blocking::Client::new().post(format!("http://{}/v1/responses",proxy.listen_addr))
+            .json(&json!({"model":"offrail-27b","stream":false,"input":input,
+                "tools":[{"type":"function","name":"read_file","parameters":{"type":"object","properties":{}}}]}))
+            .send().unwrap();
+        assert_eq!(
+            response.status().as_u16(),
+            200,
+            "{}",
+            response.text().unwrap()
+        );
+        serde_json::from_slice::<serde_json::Value>(
+            &upstream
+                .body_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    send(json!([{"role":"user","content":"Inspect the fixture."}]));
+    let sent = send(json!([
+        {"role":"user","content":"Inspect the fixture."},
+        {"type":"reasoning","summary":[{"type":"summary_text","text":"Inspect the fixture."}]},
+        {"type":"function_call","call_id":"call_fixture","name":"read_file","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_fixture","output":"FILE_CONTENT"}
+    ]));
+    let messages = sent["messages"].as_array().unwrap();
+    assert_eq!(
+        messages.last().unwrap()["role"],
+        "tool",
+        "full replay must end at the supplied tool output: {messages:?}"
+    );
+    assert_eq!(messages.last().unwrap()["content"], "FILE_CONTENT");
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.get("reasoning_content").is_some())
+            .count(),
+        1
+    );
+    // A caller supplying only the delta still needs the exact cached call history.
+    let delta = send(
+        json!([{ "type":"function_call_output","call_id":"call_fixture","output":"NEXT_CONTENT" }]),
+    );
+    assert!(
+        delta["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "user" && m["content"] == "Inspect the fixture.")
+    );
+    drop(proxy);
+    fs::remove_dir_all(paths.root).unwrap();
 }
