@@ -31,7 +31,7 @@ pub use super_optimizers::{
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
 
 pub const RTK_MINIMUM_SUPPORTED_VERSION: &str = "0.46.0";
-pub const RTK_LATEST_STABLE_REFERENCE: &str = "1.1.0";
+pub const RTK_LATEST_STABLE_REFERENCE: &str = "1.2.0";
 
 pub const CODEBASE_MEMORY_MINIMUM_SUPPORTED_VERSION: &str = "0.9.1-rc.1";
 pub const CODEBASE_MEMORY_LATEST_STABLE_REFERENCE: &str = "0.12.1";

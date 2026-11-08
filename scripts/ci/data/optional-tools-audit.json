@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-10-27T15:33:13.729228+00:00",
-  "release": "0.166.3",
+  "audited_at": "2026-11-08T15:03:39.912612+00:00",
+  "release": "0.167.3",
   "tools": [
     {
       "id": "rtk",
       "repository": "https://github.com/rtk-ai/rtk",
-      "latest_stable": "1.1.0",
-      "release": "v1.1.0",
-      "commit": "753a3b0e939f2e4490fc24e3a1984010f40a103c",
-      "git_tree": "46bf15ae94050e7edad7e148891a2d60b2e9040e",
-      "checksums_asset": "sha256:57622fe1d00db0cbd7473161ec264806402844cd0f5e9314195e0f8eb9f4b0b5",
+      "latest_stable": "1.2.0",
+      "release": "v1.2.0",
+      "commit": "e288a18c04452fd26192f59132e5324a8bb6924d",
+      "git_tree": "851138d9ce43e54795e55da9d6b733f3dbb072ab",
+      "checksums_asset": "sha256:cb6c58f0a063ee1ec2313d61d3ba7da6b4af95edf7a333739a692c099af4f48e",
       "assets": {
-        "linux-x86_64-musl": "sha256:9454ad1b9489daa57ab0a9f4ebe2faaf4dc82b8a0f26c9e5135151abd7c9378d",
-        "linux-aarch64-gnu": "sha256:a5c00c3ab0129884bcb757d348afc1a650efa0f4f0769da97c341f28f89719ed",
-        "darwin-x86_64": "sha256:1e23e8b9542b58428e6409c49b1c3fb92c4c0d5125da72e80f002a46086a6c20",
-        "darwin-aarch64": "sha256:8da773b0954cf90b115ec95c4e4eb420f04c39de233c5db102246a6caf073ba7",
-        "windows-x86_64": "sha256:c9a8f7a8bad471e64a343314168f38d2399a06fa327cdf5772fb0e645d99ea6f"
+        "linux-x86_64-musl": "sha256:70fee7b4a548c43dde94c77e2335550981b0bc2fb013691d8c8109b5bd0eda37",
+        "linux-aarch64-gnu": "sha256:93c1dcd37fd5fcae8fa772a5b5c34a30af142ace4f4081c8f98319146b7a10a4",
+        "darwin-x86_64": "sha256:1484ae6fffd0da180d65434eeca32e014a86a6e21dcfc7a0004fe82b7bb0a9b9",
+        "darwin-aarch64": "sha256:a2c411ffa49a8595b408c151ea47c9a812268924a76eaeecbc3a5065b02207ff",
+        "windows-x86_64": "sha256:b291b4e53d37f84b7f1696bc20559207396fb0190f20ed3c949db1b7e1c0c378"
       },
       "license": "Apache-2.0 (CLI/rtk-oss); default full binary also includes BUSL-1.1 engine",
       "runtime": "Externally managed executable; recommended, not latest-only",
@@ -26,8 +26,8 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Re-qualified for Prodex 0.439.2 after release freshness detected v1.1.0. Reviewed the exact commit/tree and relevant CLI/config delta; verified checksum manifest, all five platform archives and the official Apache-only rtk-oss Linux archive against published SHA-256 digests. Isolated HOME probes passed version/help, bypass, legacy proxy alias and child exit-status propagation. Full binary retains its disclosed BUSL-1.1 engine; no installed tool, hook or user configuration changed. Compatible minimum remains 0.46.0.",
-      "audited_at": "2026-10-26T09:28:05.869710+00:00"
+      "notes": "Qualified for Prodex 0.167.3 after the mandatory freshness check found v1.2.0. Reviewed release notes and CLI/build delta; verified the checksum manifest, five platform archives, and the Apache-only Linux archive against published asset digests. Isolated Linux full/OSS probes passed version/help, bypass, legacy proxy alias, and child exit-code propagation. The full distribution retains its disclosed BUSL-1.1 engine. No installed tool, hook, daemon, or user configuration was replaced; the compatible minimum remains 0.46.0.",
+      "audited_at": "2026-11-08T15:03:39.912612+00:00"
     },
     {
       "id": "codebase-memory-mcp",
