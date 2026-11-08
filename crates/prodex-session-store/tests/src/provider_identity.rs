@@ -204,6 +204,29 @@ fn provider_migration_recovers_promoted_overlay_index_without_history_scan() {
 
 #[test]
 fn provider_migration_prepares_all_indexed_targets_for_the_native_picker() {
+    // Concurrent lock-holder tests spawn children from this process. A fork may
+    // briefly inherit this test's just-released publication locks until exec,
+    // which legitimately makes the next nonblocking repair defer. Run the
+    // all-idle batch contract in its own process, retaining the exact 41/0 result.
+    const ISOLATED: &str = "PRODEX_TEST_PICKER_MIGRATION_ISOLATED";
+    if std::env::var_os(ISOLATED).is_none() {
+        let result = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::provider_identity::provider_migration_prepares_all_indexed_targets_for_the_native_picker",
+                "--test-threads=1",
+            ])
+            .env(ISOLATED, "1")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "isolated migration failed: {} {}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        return;
+    }
     let root = test_temp_dir("provider-migration-batch");
     let (explicit, _) = rollout(&root, "archived_sessions", OTHER_ID, ALIAS);
     let connection = index(&root, "complete");

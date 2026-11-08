@@ -7,7 +7,12 @@ fn temp_overlay(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    std::env::temp_dir().join(format!("prodex-{name}-{}-{stamp}", std::process::id()))
+    // Managed overlays use resolved directories. Normalize the OS temp root before
+    // passing this fixture to the no-follow private catalog writer.
+    std::env::temp_dir()
+        .canonicalize()
+        .expect("temporary root must exist")
+        .join(format!("prodex-{name}-{}-{stamp}", std::process::id()))
 }
 
 #[test]
