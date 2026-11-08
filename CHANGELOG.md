@@ -2,68 +2,67 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.167.3 - 2026-11-08
+
+### Docs
+
+- Keep the release guide link valid in generated changelogs (`9e3bcc9`)
+
+### Misc
+
+- Preserve model selection and support Offrail coding tools (`cf22e35`)
+# Prodex 0.167.3
+
+Make the gaming-GPU Offrail/Bonsai local-model workflow usable without manually
+reselecting the model or inheriting unsupported cloud reasoning effort.
+
+## New Features
+
+- Add an automatic local compatibility profile for `offrail-27b` and
+  `bonsai-2-27b`. Codex keeps its Responses interface while Prodex uses the
+  backend's Chat Completions function-tool protocol.
+- Reuse the existing streaming, continuation, freeform patch, and namespaced MCP
+  adapters. Tools remain available instead of silently discarding unsupported
+  Responses tool types.
+
+## Bug Fixes
+
+- Preserve local model, provider, catalog, effort, and context configuration at
+  command-line precedence across Super's owned app-server. A trusted project
+  config can no longer replace an explicit local model with a cloud default.
+- Advertise the template's `low`, `medium`, and `xhigh` reasoning levels. Use
+  `medium` when inherited settings are unsupported; reject explicit unsupported
+  effort before inference, and return HTTP 400 for invalid wire-level effort.
+- Honor numeric CLI context and auto-compaction budgets in the generated local
+  catalog instead of falling back to 16K.
+- Combine trusted instruction fragments into the single initial system message
+  required by the local template, without promoting user/tool content.
+- Preserve the local backend's parallel-tool control during native compaction,
+  including tool-free summarization requests and the following conversation turn.
+- Preserve original tool identities and continuation results, strip cloud
+  authorization from local upstream traffic, and keep ordinary Responses and
+  cloud-provider routes unchanged.
+
+- Qualify RTK 1.2.0 after the release freshness gate detected the new stable
+  version; retain the existing minimum and externally managed installation.
+
+## Compatibility and Upgrade
+
+The qualified Codex CLI remains 0.167.0. Super still automatically enables
+installed compatible RTK, Codebase Memory MCP, Playwright MCP, and Ponytail;
+Presidio still asks for consent. Global configuration and the external model
+server are not rewritten. See [Local Models](https://github.com/christiandoxa/prodex/blob/main/LOCAL.md) for the command,
+supported reasoning levels, and backend expectations.
+
+## Changelog
+
+Full Changelog: [0.167.2...0.167.3](https://github.com/christiandoxa/prodex/compare/0.167.2...0.167.3)
+
 ## 0.167.2 - 2026-11-08
 
 ### Misc
 
 - Stream large legacy histories and bound startup reads (`f6e8647`)
-# Prodex 0.167.2
-
-Fix delayed startup and unavailable-provider errors when resuming large saved
-conversations with Codex 0.167.0.
-
-## New Features
-
-Legacy OpenAI provider repair now supports large plain and compressed rollouts
-with streaming snapshots and atomic replacement instead of buffering the whole
-conversation. Indexed legacy sessions are prepared before the native picker
-opens, not just an arbitrary first batch of 32.
-
-## Bug Fixes
-
-- Remove repeated full-transcript scans from resume provider/model discovery,
-  workspace trust, valid metadata-prefix checks, and recovery initialization.
-- Read a bounded metadata header and complete-record tail for plain launch
-  metadata. Leave settings absent from that view to native Codex rather than
-  inventing a model or reasoning effort.
-- Remove the 64 MiB whole-rollout restriction from reserved provider migration
-  without increasing the memory ceiling for unrelated repair operations.
-- Preserve transcript bytes, UUIDs, ordinals, modification times, and native
-  pagination offsets. Fixed-width JSON whitespace keeps the metadata prefix
-  the same size while changing only the reserved provider identity.
-- Publish only complete durable provider backups. Interrupted staging copies
-  cannot become partial authoritative snapshots that poison a retry.
-- Retain generic historical rollout filenames, custom-provider routing,
-  compressed-session support, and strict duplicate-identity handling.
-
-## Compatibility and Upgrade
-
-The qualified native Codex version remains 0.167.0. RTK, Codebase Memory,
-Playwright MCP, and Ponytail remain automatic in Super; Presidio still asks
-for consent.
-
-Start a new runtime after updating. The first legacy conversion performs a
-one-time streamed copy and needs space for its backup and staged replacement.
-Keep the private `.prodex-provider-identity-bak` files until recovery is no
-longer needed. Do not delete session history or reset the native state database
-to work around a provider mismatch.
-
-Active writer/publication locks are respected. Busy sessions, conflicting
-backups, invalid metadata, or storage failures defer repair with a diagnostic
-rather than risking history loss. Unindexed discovery retains its bounded
-fallback while native backfill completes. Native Codex still owns the actual
-conversation replay after Prodex finishes its startup preparation.
-
-## Verification
-
-Regression coverage includes large plain/compressed history, exact backups,
-byte-offset preservation, partial records, cross-process writer contention,
-process termination before publication, and native UUID/picker resume flows.
-Native checks use isolated synthetic accounts and local model endpoints.
-
-## Changelog
-
-Full Changelog: [0.167.1...0.167.2](https://github.com/christiandoxa/prodex/compare/0.167.1...0.167.2)
 
 ## 0.167.1 - 2026-11-08
 
