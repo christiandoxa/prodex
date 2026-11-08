@@ -2,6 +2,11 @@ use crate::{ProviderTransformLoss, ProviderTransformResult};
 
 #[path = "bridge/chat_compat.rs"]
 mod chat_compat;
+#[path = "bridge/chat_compat/local.rs"]
+mod local_chat;
+pub use self::local_chat::{
+    provider_core_local_chat_parallel_control, provider_core_local_chat_system_messages,
+};
 
 pub use self::chat_compat::{
     provider_core_chat_compatible_created_at, provider_core_chat_compatible_responses_usage,
@@ -10,7 +15,6 @@ pub use self::chat_compat::{
     provider_core_chat_compatible_rtk_wrapped_tool_arguments,
     provider_core_chat_compatible_tool_call_thought_signature,
     provider_core_chat_compatible_validate_top_level_request_shape,
-    provider_core_local_chat_parallel_control, provider_core_local_chat_system_messages,
     provider_core_split_flat_namespace_tool_name,
 };
 
