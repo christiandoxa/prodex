@@ -8,6 +8,7 @@ use std::{fs, time::Duration};
 
 const KEY: &str = "synthetic-local-auth-fixture";
 const CHAT: &str = r#"{"id":"chatcmpl_auth_fixture","object":"chat.completion","model":"offrail-27b","choices":[{"index":0,"message":{"role":"assistant","content":"AUTH_OK"},"finish_reason":"stop"}]}"#;
+const RESPONSES_SSE: &str = "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_local_fixture\",\"object\":\"response\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_local_fixture\",\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\n";
 
 fn proxy(paths: &crate::AppPaths, url: String, key: Option<&str>) -> crate::RuntimeRotationProxy {
     start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
@@ -122,6 +123,99 @@ fn local_api_key_authenticates_inference_and_keeps_catalog_local_without_cloud_h
             fs::remove_dir_all(paths.root).unwrap();
         }
     }
+}
+
+#[test]
+fn local_responses_tool_followup_keeps_unkeyed_and_keyed_sessions_working() {
+    for key in [None, Some(KEY)] {
+        let paths = app_paths_for_root(temp_root("local-responses-followup"));
+        let upstream =
+            TestUpstream::start_with_responses(vec![200, 200], "text/event-stream", RESPONSES_SSE);
+        let proxy = proxy(&paths, format!("http://{}/v1", upstream.addr), key);
+        let client = reqwest::blocking::Client::new();
+        for input in [
+            json!([{"type":"message","role":"user","content":"run a command"}]),
+            json!([
+                {"type":"message","role":"user","content":"run a command"},
+                {"type":"function_call","call_id":"call_fixture","name":"exec_command","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call_fixture","output":"ok"}
+            ]),
+        ] {
+            let response = client
+                .post(format!("http://{}/v1/responses", proxy.listen_addr))
+                .header("session_id", "session_fixture")
+                .json(&json!({"model":"generic-local","input":input,"stream":true}))
+                .send()
+                .unwrap();
+            assert_eq!(response.status().as_u16(), 200);
+            assert!(response.text().unwrap().contains("response.completed"));
+            let headers = upstream
+                .headers_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap();
+            let auth = headers.iter().find(|(name, _)| name == "authorization");
+            assert_eq!(
+                auth.map(|(_, value)| value.clone()),
+                key.map(|v| format!("Bearer {v}"))
+            );
+        }
+        drop(proxy);
+        fs::remove_dir_all(paths.root).unwrap();
+    }
+}
+
+#[test]
+fn unkeyed_local_responses_rejects_bindings_for_other_keys_or_endpoints() {
+    use prodex_provider_core::{ProviderId, RuntimeProviderBindingIdentity};
+    use prodex_state::ResponseProfileBinding;
+
+    let paths = app_paths_for_root(temp_root("local-unkeyed-binding-boundary"));
+    let upstream = TestUpstream::start_with_responses(Vec::new(), "application/json", "{}");
+    let url = format!("http://{}/v1", upstream.addr);
+    for identity in [
+        RuntimeProviderBindingIdentity::from_raw_key(ProviderId::OpenAi, KEY, &url, None),
+        RuntimeProviderBindingIdentity::from_public_credential_identity(
+            ProviderId::OpenAi,
+            "prodex-local",
+            "https://other.example.com/v1",
+            None,
+        ),
+    ] {
+        let mut state = AppState::default();
+        state.session_profile_bindings.insert(
+            "session_fixture".into(),
+            ResponseProfileBinding {
+                profile_name: "local".into(),
+                bound_at: chrono::Local::now().timestamp(),
+                binding_identity: Some(identity.unwrap()),
+            },
+        );
+        let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+            paths: &paths,
+            state: &state,
+            upstream_base_url: url.clone(),
+            provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+                local: true,
+                api_keys: Vec::new(),
+            },
+            upstream_no_proxy: true,
+            smart_context_enabled: false,
+            presidio_redaction_enabled: false,
+            model_context_window_tokens: Some(131072),
+            preferred_listen_addr: Some("127.0.0.1:0"),
+        })
+        .unwrap();
+        let response = reqwest::blocking::Client::new()
+            .post(format!("http://{}/v1/responses", proxy.listen_addr))
+            .header("session_id", "session_fixture")
+            .json(&json!({"model":"generic-local","input":"fixture","stream":true}))
+            .send()
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 503);
+        assert!(upstream.body_rx.try_recv().is_err());
+        drop(proxy);
+    }
+    fs::remove_dir_all(paths.root).unwrap();
 }
 
 #[test]

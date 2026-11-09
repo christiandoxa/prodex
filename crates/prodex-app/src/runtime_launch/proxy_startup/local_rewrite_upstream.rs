@@ -807,6 +807,34 @@ pub(super) fn send_runtime_openai_upstream_request(
         )?,
         ..binding
     };
+    if api_keys.is_empty()
+        && matches!(
+            shared.provider.as_ref(),
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses { local: true, .. }
+        )
+    {
+        let identity = RuntimeProviderBindingIdentity::from_public_credential_identity(
+            ProviderId::OpenAi,
+            "prodex-local",
+            &shared.upstream_base_url,
+            None,
+        )
+        .ok_or_else(|| anyhow::anyhow!("local continuation identity is unavailable"))?;
+        if binding
+            .bound
+            .as_ref()
+            .is_some_and(|bound| bound.binding_identity.as_ref() != Some(&identity))
+        {
+            anyhow::bail!("local continuation binding is unavailable or unauthorized");
+        }
+        return runtime_local_rewrite_send_openai_unkeyed(
+            request_id,
+            request,
+            shared,
+            &upstream_url,
+            body,
+        );
+    }
     let (attempts, hard_binding) =
         runtime_local_rewrite_openai_attempts(shared, api_keys, binding.bound.as_ref())?;
     if !hard_binding && attempts.is_empty() {
