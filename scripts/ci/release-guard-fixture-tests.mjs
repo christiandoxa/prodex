@@ -281,7 +281,12 @@ async function buildFixtures(fixtureRoot) {
     ].join("\n"),
   );
   await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.2.2 - 2026-01-02\n\n- Coupled release marker.\n");
+  await writeFile(fixtureRoot, "docs/release-notes/0.2.2.md", "# Notes\n");
   const coupledRelease = await commit(fixtureRoot, "chore(release): release 0.2.2");
+
+  await writeFile(fixtureRoot, "Cargo.toml", '[package]\nname = "prodex-fixture"\nversion = "0.2.3"\n');
+  await writeFile(fixtureRoot, "docs/release-notes/0.2.4.md", "# Wrong version\n");
+  const mismatchedNotesRelease = await commit(fixtureRoot, "chore(release): release 0.2.3");
 
   const duplicateBase = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
   await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.3.0 - 2026-01-02\n\n- First release marker.\n");
@@ -424,6 +429,12 @@ async function buildFixtures(fixtureRoot) {
       script: "version-metadata-release-guard.mjs",
       args: ["--commit", coupledRelease],
       expectedExit: 0,
+    },
+    {
+      name: "release notes for a different version fail version metadata guard",
+      script: "version-metadata-release-guard.mjs",
+      args: ["--commit", mismatchedNotesRelease],
+      expectedExit: 1,
     },
     {
       name: "duplicate release range fails duplicate guard",

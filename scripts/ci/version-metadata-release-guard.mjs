@@ -4,6 +4,7 @@ import {
   isVersionMetadataChangePath,
   isReleaseLikeMessage,
   parseReleaseGuardArgs,
+  releaseEntryFromMessage,
   selectedChanges,
 } from "./release-guard-common.mjs";
 import { normalizeGitPath } from "./guard-common.mjs";
@@ -55,11 +56,14 @@ function assertSingleSelector(args) {
 function evaluateChange(change) {
   const metadataFiles = change.files.filter((filePath) => isVersionMetadataChangePath(change, filePath));
   const releaseLike = isReleaseLikeMessage(change.message);
+  const releaseVersion = releaseEntryFromMessage(change.message)?.version;
   const nonMetadataFiles = change.files.filter((filePath) => {
     if (isVersionMetadataChangePath(change, filePath)) {
       return false;
     }
-    return !(releaseLike && normalizeGitPath(filePath) === CHANGELOG_PATH);
+    const normalized = normalizeGitPath(filePath);
+    return !(releaseLike && (normalized === CHANGELOG_PATH ||
+      (releaseVersion && normalized === `docs/release-notes/${releaseVersion}.md`)));
   });
   const reasons = [];
   if (metadataFiles.length > 0 && !releaseLike) {
