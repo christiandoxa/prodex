@@ -52,6 +52,7 @@ const RUNTIME_LOCAL_REWRITE_STREAM_CHUNK_BYTES: usize = 64 * 1024;
 #[path = "local_rewrite_upstream/binding_candidate.rs"]
 mod binding_candidate;
 pub(super) use binding_candidate::runtime_local_rewrite_mojo_binding_identity;
+use binding_candidate::runtime_local_rewrite_openai_attempts;
 
 #[path = "local_rewrite_upstream/binding_identity.rs"]
 mod binding_identity;
@@ -854,50 +855,6 @@ pub(super) fn send_runtime_openai_upstream_request(
         hard_binding,
         &binding,
     )
-}
-fn runtime_local_rewrite_openai_attempts<'a>(
-    shared: &RuntimeLocalRewriteProxyShared,
-    api_keys: &'a [String],
-    bound: Option<&ResponseProfileBinding>,
-) -> Result<(Vec<(String, &'a str)>, bool)> {
-    if let Some(bound) = bound {
-        let Some(bound_identity) = bound.binding_identity.as_ref() else {
-            return Err(anyhow::anyhow!(
-                "OpenAI continuation binding has no exact key identity"
-            ));
-        };
-        let attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys)
-            .into_iter()
-            .filter(|(_, api_key)| {
-                RuntimeProviderBindingIdentity::from_raw_key(
-                    ProviderId::OpenAi,
-                    api_key,
-                    &shared.upstream_base_url,
-                    None,
-                )
-                .is_some_and(|identity| identity == *bound_identity)
-            })
-            .collect::<Vec<_>>();
-        if attempts.is_empty() {
-            return Err(anyhow::anyhow!(
-                "OpenAI continuation binding is unavailable or unauthorized"
-            ));
-        }
-        return Ok((attempts, true));
-    }
-    let attempt_limit = shared
-        .runtime_shared
-        .runtime_config
-        .tuning
-        .precommit_attempt_limit
-        .max(1);
-    Ok((
-        runtime_local_rewrite_api_key_attempts(shared, api_keys)
-            .into_iter()
-            .take(attempt_limit)
-            .collect(),
-        false,
-    ))
 }
 fn runtime_local_rewrite_send_openai_unkeyed(
     request_id: u64,

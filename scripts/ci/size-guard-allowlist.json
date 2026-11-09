@@ -41,7 +41,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-    "maxLines": 1967,
+    "maxLines": 1952,
     "reason": "Upstream transport remains one audited I/O boundary after extracting binding-candidate policy, OpenAI retry gates, binding identity-source selection, and the test request-reader helper; cap tracks the exact reviewed LOC without restoring policy fallbacks. Local OpenAI protocol dispatch and trace-context coverage now live in focused local-chat siblings."
   },
   {
