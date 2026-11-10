@@ -284,6 +284,49 @@ fn local_chat_compaction_accepts_history_without_new_tool_definitions() {
     fs::remove_dir_all(paths.root).unwrap();
 }
 
+#[test]
+fn local_responses_compaction_preserves_completed_tool_history_and_logs_status() {
+    let paths = app_paths_for_root(temp_root("local-responses-compact-tool"));
+    let upstream = TestUpstream::start_n(2);
+    let proxy = local_proxy(&paths, &upstream, true);
+    let client = reqwest::blocking::Client::new();
+    let metadata =
+        json!({"request_kind":"compaction","session_id":"test-session","thread_id":"test-thread"})
+            .to_string();
+    let compact = json!({"model":"generic-local","stream":false,"tools":[],
+        "client_metadata":{"x-codex-turn-metadata": metadata}, "input":[
+            {"type":"function_call","call_id":"call-test","name":"write_file","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call-test","output":"write completed"},
+            {"role":"user","content":"Summarize progress"}]});
+    let followup = json!({"model":"generic-local","stream":false,"input":[
+        {"role":"assistant","content":"The write_file call completed once."},
+        {"role":"user","content":"Continue without repeating completed work."}]});
+    for body in [&compact, &followup] {
+        let response = client
+            .post(format!("http://{}/v1/responses", proxy.listen_addr))
+            .json(body)
+            .send()
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        response.text().unwrap();
+        let sent: Value = serde_json::from_slice(
+            &upstream
+                .body_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sent["input"], body["input"]);
+    }
+    let log = crate::read_runtime_proxy_test_log(&proxy.log_path);
+    assert!(log.contains("local_compaction_started"));
+    assert!(log.contains("local_compaction_request_ended"));
+    assert!(!log.contains("write completed"));
+    assert!(!log.contains("test-session"));
+    drop(proxy);
+    fs::remove_dir_all(paths.root).unwrap();
+}
+
 #[path = "local_resume.rs"]
 mod local_resume;
 

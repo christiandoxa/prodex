@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn local_dry_run_warns_when_compaction_headroom_is_small() {
+    let fixture = setup_fixture();
+    for (threshold, warning) in [("220000", false), ("245000", true), ("250000", true)] {
+        let output = run_prodex(
+            &fixture,
+            &[
+                "s",
+                "--dry-run",
+                "--url",
+                "http://127.0.0.1:8131",
+                "--model",
+                "local/model",
+                "--context-window",
+                "262144",
+                "--auto-compact-token-limit",
+                threshold,
+                "--no-presidio",
+                "--no-sub-agent",
+            ],
+        );
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            stderr.contains("auto-compact threshold"),
+            warning,
+            "{stderr}"
+        );
+    }
+}
+
+#[test]
 fn super_dry_run_reports_default_profile_and_disabled_redaction_completion() {
     let fixture = setup_fixture();
     let output = run_prodex(

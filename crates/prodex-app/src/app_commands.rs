@@ -75,8 +75,63 @@ pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
         super_prompt::prompt_super_main_agent_configuration,
         super_prompt::prompt_super_sub_agent_configuration,
     )?;
+    warn_local_compaction_headroom(&args);
     let args = runtime_launch::resolved_super_runtime_tool_args(args, use_presidio)?;
     handle_super_runtime_tools(args, sub_agent)
+}
+
+pub(crate) fn warn_local_compaction_headroom(args: &SuperArgs) {
+    if args.url.is_some()
+        && let (Some(context), Some(compact)) = (
+            args.local_context_window,
+            args.local_auto_compact_token_limit,
+        )
+        && let Some(warning) = local_compaction_headroom_warning(context, compact)
+    {
+        eprintln!("warning: {warning}");
+    }
+}
+
+fn local_compaction_headroom_warning(context: usize, compact: usize) -> Option<String> {
+    if context <= 1 || compact == 0 {
+        return None;
+    }
+    let effective = (context / 100) * 95 + (context % 100) * 95 / 100;
+    if compact >= effective {
+        Some(format!(
+            "auto-compact threshold {compact} reaches or exceeds the effective context {effective}; compaction may start too late"
+        ))
+    } else if effective - compact < effective / 20 {
+        Some(format!(
+            "auto-compact threshold {compact} leaves only {} tokens before the effective context {effective}; large tool outputs may exceed it",
+            effective - compact
+        ))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod local_compaction_headroom_tests {
+    use super::local_compaction_headroom_warning;
+
+    #[test]
+    fn warns_for_small_or_exhausted_effective_context() {
+        assert_eq!(local_compaction_headroom_warning(262_144, 220_000), None);
+        assert_eq!(local_compaction_headroom_warning(262_144, 235_000), None);
+        assert_eq!(local_compaction_headroom_warning(0, 245_000), None);
+        assert_eq!(local_compaction_headroom_warning(262_144, 0), None);
+        assert!(
+            local_compaction_headroom_warning(262_144, 245_000)
+                .unwrap()
+                .contains("4036 tokens")
+        );
+        assert!(
+            local_compaction_headroom_warning(262_144, 250_000)
+                .unwrap()
+                .contains("exceeds")
+        );
+    }
 }
 
 pub(super) fn resolve_super_sub_agent(

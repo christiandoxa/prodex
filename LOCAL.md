@@ -255,6 +255,11 @@ exec prodex super \
   "$@"
 ```
 
+Prodex warns when an explicit local compaction threshold leaves less than 5% of
+the effective context as headroom. For Codex local compaction requests carrying
+turn metadata, `prodex log` shows the start, progress every 30 seconds, and
+request end with elapsed time. Request end does not imply success.
+
 ## Required Tests
 
 Check the server sees your model:

@@ -6,6 +6,7 @@ use super::super::local_rewrite_application_data_plane::{
     runtime_gateway_application_provider_dispatch, runtime_gateway_route_uses_compact_dispatch,
     runtime_gateway_route_uses_models_dispatch,
 };
+use super::super::local_rewrite_compaction_status::LocalCompactionStatus;
 use super::super::local_rewrite_copilot::runtime_copilot_model_catalog_from_provider;
 use super::super::local_rewrite_gemini_compact::runtime_gemini_compact_response;
 use super::super::local_rewrite_gemini_compact::runtime_local_compact_response_parts_with_reason;
@@ -239,6 +240,18 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
     }
 
     let route_kind = runtime_local_rewrite_route_kind(dispatch.endpoint());
+    let _compaction_status = if matches!(
+        selected_shared.provider.as_ref(),
+        RuntimeLocalRewriteProviderOptions::OpenAiResponses { local: true, .. }
+    ) {
+        LocalCompactionStatus::start(
+            &request.captured,
+            request.state.request_id,
+            &selected_shared.runtime_shared,
+        )
+    } else {
+        None
+    };
     let started_at = Instant::now();
     let mut result = send_runtime_local_rewrite_upstream_request(
         request.state.request_id,

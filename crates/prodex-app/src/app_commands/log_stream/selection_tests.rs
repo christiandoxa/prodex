@@ -9,6 +9,17 @@ fn parsed(event: &str, fields: &str) -> Option<ParsedOperationalEvent> {
 }
 
 #[test]
+fn local_compaction_progress_is_visible_with_elapsed_time() {
+    let selected = parsed(
+        "local_compaction_in_progress",
+        "request=17 elapsed_ms=30000",
+    )
+    .unwrap();
+    assert_eq!(selected.transcript.source, "compact");
+    assert!(selected.transcript.text.contains("30000"));
+}
+
+#[test]
 fn compiled_operational_selection_suppresses_payloads_and_unswitched_profile_commits() {
     const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
     for event in [

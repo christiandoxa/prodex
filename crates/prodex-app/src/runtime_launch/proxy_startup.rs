@@ -16,6 +16,7 @@ mod gemini_thought_signatures;
 mod local_rewrite;
 mod local_rewrite_anthropic;
 mod local_rewrite_application_data_plane;
+mod local_rewrite_compaction_status;
 mod local_rewrite_constraints;
 mod local_rewrite_copilot;
 mod local_rewrite_copilot_bindings;
