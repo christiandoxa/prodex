@@ -88,7 +88,8 @@ pub(crate) fn warn_local_compaction_headroom(args: &SuperArgs) {
         )
         && let Some(warning) = local_compaction_headroom_warning(context, compact)
     {
-        eprintln!("warning: {warning}");
+        let fallback = format!("warning: {warning}");
+        let _ = print_user_stderr_panel("Prodex Warning", &[warning], &[fallback]);
     }
 }
 
