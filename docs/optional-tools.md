@@ -57,8 +57,8 @@ are created in the temporary overlay. Presidio still asks for consent before
 an interactive launch; `--presidio` and `--no-presidio` keep their existing
 non-interactive meanings. `--tool` adds to the automatic set, not replaces it.
 
-The release-qualified references for 0.166.1 are RTK 1.1.0, Codebase Memory MCP
-0.12.1, Playwright MCP 0.0.84, Ponytail 5.3.3, and Presidio 2.2.366. The freshness
+The current release-qualified references are RTK 1.2.0, Codebase Memory MCP
+0.12.1, Playwright MCP 0.0.85, Ponytail 5.3.3, and Presidio 2.2.366. The freshness
 gate verifies upstream GitHub releases and the applicable npm/PyPI metadata.
 Qualification does not automatically replace running tools or services.
 
@@ -102,7 +102,7 @@ Kiro launches retain that shared server but add `check_index_coverage` to the
 server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
 Schema composition; all other Codebase Memory tools remain available.
 Both ordinary launch and required-tool checks verify the Node runtime before
-probing the installed Playwright package. Playwright MCP requires validated Node.js 18+, `npx`, and Playwright MCP `0.0.79` or newer. Prodex invokes `npx --no-install @playwright/mcp`, probes the installed package version, and rejects an installed version below the minimum. `0.0.84` is the current latest-stable release-qualified reference.
+probing the installed Playwright package. Playwright MCP requires validated Node.js 18+, `npx`, and Playwright MCP `0.0.79` or newer. Prodex invokes `npx --no-install @playwright/mcp`, probes the installed package version, and rejects an installed version below the minimum. `0.0.85` is the current latest-stable release-qualified reference.
 Presidio remains a consent-controlled service selection and uses the existing
 launch/expose health checks. Prodex accepts official Presidio analyzer/anonymizer images at `2.2.364` or newer; the release-qualified defaults remain digest-pinned, while newer official images can be supplied with `PRODEX_PRESIDIO_ANALYZER_IMAGE` and `PRODEX_PRESIDIO_ANONYMIZER_IMAGE`. `--require-tool presidio` additionally requires healthy services
 and `fail_mode = "closed"`, so an inspection failure cannot silently bypass
