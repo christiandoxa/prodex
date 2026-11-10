@@ -6,8 +6,29 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Refresh optional-tool release qualification (`753be7e`)
 - Render local compaction warnings with terminal UI (`424e678`)
 - Improve local compaction observability (`6c83994`)
+# Prodex 0.167.6
+
+Make local-model compaction easier to monitor and configure.
+
+## New Features
+
+- Warn when a local auto-compaction threshold leaves little effective context for tool output.
+- Show local compaction start, periodic progress, and elapsed request time in `prodex log` when Codex supplies turn metadata.
+
+## Bug Fixes
+
+- Apply the context-headroom warning to both normal and dry-run launches.
+- Cover preservation of completed tool history through local compaction and follow-up requests.
+
+## Changelog
+
+- Refresh the release-qualified Playwright MCP reference to 0.0.85; the existing runtime minimum remains unchanged.
+- Keep local compaction diagnostics free of prompts, session identifiers, and API keys.
+
+Full Changelog: [0.167.5...0.167.6](https://github.com/christiandoxa/prodex/compare/0.167.5...0.167.6)
 
 ## 0.167.5 - 2026-11-09
 
