@@ -2,6 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.167.6 - 2026-11-11
+
+### Misc
+
+- Render local compaction warnings with terminal UI (`424e678`)
+- Improve local compaction observability (`6c83994`)
+
 ## 0.167.5 - 2026-11-09
 
 ### Deps
@@ -13,26 +20,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Preserve unkeyed Responses session bindings (`e3a7a5d`)
 - Merge remote-tracking branch 'origin/pr-125' into task/strata-01675 (`c1839ef`)
 - Merge remote-tracking branch 'origin/pr-124' into task/strata-01675 (`9cf3bbe`)
-# Prodex 0.167.5
-
-Update dependencies and keep the release checks aligned with their verified pins.
-
-## New Features
-
-- Existing `--url` launches support API-key-protected OpenAI-compatible endpoints.
-
-## Bug Fixes
-
-- Fix tool-call follow-ups for local OpenAI-compatible endpoints that do not require an API key.
-- Keep the SonarQube action pin and supply-chain guard synchronized.
-- Accept release notes for the matching version in metadata-only release commits.
-
-## Changelog
-
-- Update `toml` and the SonarQube scan action through Dependabot.
-- Preserve the existing local endpoint authentication and context controls.
-
-Full Changelog: [0.167.4...0.167.5](https://github.com/christiandoxa/prodex/compare/0.167.4...0.167.5)
 
 ## 0.167.4 - 2026-11-09
 
@@ -131,13 +118,3 @@ Full Changelog: [0.167.4...0.167.5](https://github.com/christiandoxa/prodex/comp
 
 - Preserve Guardian parent routing affinity (`4b3c21c`)
 - Accommodate Codex 0.166.0 policy responses (`5c0e7a7`)
-
-## 0.165.1 - 2026-10-28
-
-### Runtime
-
-- Park idle sockets and preserve interrupt transport ownership (`6a012e6`)
-
-### Misc
-
-- Expose bounded controls for upgraded local sockets (`8a2bbed`)
