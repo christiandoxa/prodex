@@ -310,3 +310,79 @@ fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
             .contains("prodex-context-ref v=1")
     );
 }
+
+#[test]
+fn smart_context_codex_01671_preserves_incremental_tools_and_hosted_search() {
+    for compaction in [false, true] {
+        let shared = smart_context_test_shared("codex-incremental-tools");
+        register_runtime_smart_context_proxy_state(&shared, true, None, None);
+        smart_context_observe_minimal_budget(&shared);
+        let repeated = (0..650)
+            .map(|index| format!("line {index}: repeated build diagnostics"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut original = serde_json::json!({
+            "model": "gpt-4o",
+            "instructions": "",
+            "stream": true,
+            "tools": [{"type": "web_search", "search_context_size": "medium"}],
+            "input": [
+                {"type": "additional_tools", "role": "developer", "tools": [
+                    {"type": "namespace", "name": "mcp__fixture", "description": "Fixture tools",
+                        "tools": [{"type": "function", "name": "read", "parameters": {
+                            "type": "object", "properties": {"path": {"type": "string"}}
+                        }}]}
+                ]},
+                {"type": "message", "role": "developer", "content": [{
+                    "type": "input_text", "text": "The following tools are no longer available. Do not call them:\n- mcp__fixture.read"
+                }]},
+                {"type": "additional_tools", "role": "developer", "tools": [
+                    {"type": "namespace", "name": "mcp__fixture", "description": "Updated fixture tools",
+                        "tools": [{"type": "function", "name": "read", "parameters": {
+                            "type": "object", "properties": {"path": {"type": "string"}, "limit": {"type": "integer"}}
+                        }}]}
+                ]},
+                {"type": "function_call_output", "call_id": "call_first", "output": repeated},
+                {"type": "function_call_output", "call_id": "call_second", "output": repeated}
+            ]
+        });
+        if compaction {
+            original["input"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({"type": "compaction_trigger"}));
+        }
+        let request = smart_context_test_request(original.clone());
+        let prepared = prepare_runtime_smart_context_http_body(
+            1671,
+            &request,
+            &shared,
+            RuntimeRouteKind::Responses,
+        )
+        .unwrap();
+        let Cow::Owned(body) = prepared else {
+            panic!("expected a real duplicate-output rewrite, not a no-op");
+        };
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["tools"], original["tools"]);
+        assert_eq!(value["instructions"], original["instructions"]);
+        for index in 0..3 {
+            assert_eq!(value["input"][index], original["input"][index]);
+        }
+        if compaction {
+            assert_eq!(value["input"][5], original["input"][5]);
+        }
+        assert!(
+            value["input"][4]["output"]
+                .as_str()
+                .unwrap()
+                .contains("prodex-context-ref v=1")
+        );
+        let mut expanded =
+            runtime_smart_context_expand_inline_references(&original, &value).unwrap();
+        assert!(runtime_smart_context_inline_reference_round_trip_is_exact(
+            &original,
+            &mut expanded
+        ));
+    }
+}

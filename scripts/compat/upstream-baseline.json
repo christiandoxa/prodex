@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.167.0 release",
+      "baseline_source": "openai/codex rust-v0.167.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -100,7 +100,13 @@
             "CompactionTurnMetadata",
             "compaction_responses_metadata",
             "responses_metadata",
-            "run_remote_compaction_request_v2"
+            "run_remote_compaction_request_v2",
+            "step_context.incremental_tools_feature().is_some()",
+            "history.has_tool_declarations()",
+            "snapshot.has_tool_declarations()",
+            "ResponseItem::AdditionalTools { .. }",
+            "tools: if tools_in_history {",
+            ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))"
           ]
         },
         {
@@ -538,7 +544,9 @@
             "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,",
             "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
-            "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,"
+            "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+            "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
           ]
         },
         {
@@ -1017,7 +1025,7 @@
         },
         {
           "path": "codex-rs/core/src/session/environment.rs",
-          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner\u2019s first configuration or failure without overwriting a child configuration that already won.",
+          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner’s first configuration or failure without overwriting a child configuration that already won.",
           "required_contains": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -1426,7 +1434,11 @@
             ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
             "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
             "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
-            "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })"
+            "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })",
+            "pub(crate) fn build_prompt(",
+            "tools: if incremental_tools {",
+            ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))",
+            "step_context.tool_router.model_visible_specs()"
           ]
         },
         {
@@ -1446,6 +1458,29 @@
             "(\"Removed deferred tool namespaces\", &removed)",
             "\"developer\",\n                        (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG)",
             "ContentItemKind(\"tools.deferred_namespaces\".to_string())"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/session/step_context.rs",
+          "reason": "Only Lite or explicit Bedrock provider IDs may put top-level tool definitions in history. Local and regular OpenAI routes must retain their full top-level catalogs.",
+          "required_contains": [
+            "pub(crate) fn incremental_tools_feature(&self) -> Option<Feature>",
+            "if self.settings.model_info.use_responses_lite {",
+            "Some(Feature::IncrementalTools)",
+            "self.turn.config.model_provider_id.as_str(),\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID",
+            ".then_some(Feature::IncrementalToolsLegacy)",
+            "self.incremental_tools_feature()\n            .is_some_and(|feature| self.turn.config.features.enabled(feature))"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/session/world_state.rs",
+          "reason": "Incremental tool-history updates exclude hosted web search while preserving inherited declarations and native history ownership.",
+          "required_contains": [
+            "if step_context.incremental_tools_feature().is_none() {",
+            "self.preserve_parent_tool_declarations()",
+            "if incremental_tools && !preserve_parent_tool_declarations {",
+            ".filter(|tool| !matches!(tool, ToolSpec::WebSearch { .. }))",
+            "let definitions = codex_tools::create_tools_json_for_responses_lite(&specs)?;"
           ]
         }
       ],
@@ -2528,7 +2563,7 @@
           "id": "core.subagent-pending-environment-inheritance",
           "kind": "environment_inheritance",
           "file": "codex-rs/core/src/session/environment.rs",
-          "reason": "Pending subagent environments must inherit the owner\u2019s first ready/failure result without overwriting a child winner.",
+          "reason": "Pending subagent environments must inherit the owner’s first ready/failure result without overwriting a child winner.",
           "file_contains_all": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -3343,9 +3378,73 @@
             "\"developer\",\n                        (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG)",
             "ContentItemKind(\"tools.deferred_namespaces\".to_string())"
           ]
+        },
+        {
+          "id": "features.incremental-tools-independent-gates",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "Responses Lite retains its stable enabled incremental_tools feature; regular Bedrock Responses has a separate disabled opt-in.",
+          "file_contains_all": [
+            "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+          ]
+        },
+        {
+          "id": "context.incremental-tools-provider-boundary",
+          "kind": "provider_capabilities",
+          "file": "codex-rs/core/src/session/step_context.rs",
+          "reason": "Only Lite or explicit Bedrock provider IDs may put top-level tool definitions in history. Local and regular OpenAI routes must retain their full top-level catalogs.",
+          "file_contains_all": [
+            "pub(crate) fn incremental_tools_feature(&self) -> Option<Feature>",
+            "if self.settings.model_info.use_responses_lite {",
+            "Some(Feature::IncrementalTools)",
+            "self.turn.config.model_provider_id.as_str(),\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID",
+            ".then_some(Feature::IncrementalToolsLegacy)",
+            "self.incremental_tools_feature()\n            .is_some_and(|feature| self.turn.config.features.enabled(feature))"
+          ]
+        },
+        {
+          "id": "context.incremental-tools-history-layout",
+          "kind": "context_boundary",
+          "file": "codex-rs/core/src/session/world_state.rs",
+          "reason": "Incremental tool-history updates exclude hosted web search while preserving inherited declarations and native history ownership.",
+          "file_contains_all": [
+            "if step_context.incremental_tools_feature().is_none() {",
+            "self.preserve_parent_tool_declarations()",
+            "if incremental_tools && !preserve_parent_tool_declarations {",
+            ".filter(|tool| !matches!(tool, ToolSpec::WebSearch { .. }))",
+            "let definitions = codex_tools::create_tools_json_for_responses_lite(&specs)?;"
+          ]
+        },
+        {
+          "id": "responses.incremental-tools-hosted-web-search",
+          "kind": "request_context",
+          "file": "codex-rs/core/src/session/turn.rs",
+          "reason": "Native incremental requests retain hosted web_search configuration in top-level tools, not additional_tools records.",
+          "file_contains_all": [
+            "pub(crate) fn build_prompt(",
+            "tools: if incremental_tools {",
+            ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))",
+            "step_context.tool_router.model_visible_specs()"
+          ]
+        },
+        {
+          "id": "compact.incremental-tools-hosted-web-search",
+          "kind": "request_context",
+          "file": "codex-rs/core/src/compact_remote_v2_attempt.rs",
+          "reason": "Foreground and background compaction preserve incremental declarations and top-level hosted web search without duplicating base instructions.",
+          "file_contains_all": [
+            "step_context.incremental_tools_feature().is_some()",
+            "history.has_tool_declarations()",
+            "snapshot.has_tool_declarations()",
+            "ResponseItem::AdditionalTools { .. }",
+            "tools: if tools_in_history {",
+            ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))",
+            "ResponseItem::CompactionTrigger {}"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.167.0",
+      "tested_codex_release": "rust-v0.167.1",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -3777,6 +3876,21 @@
             "codex": "9d64836106d5b374e90ee4454c7ebcde7ca7106558bd7e41a34b9f26ebda251a"
           },
           "summary": "Codex resumes across providers, persists the parent edge before child storage, gates cancelled Responses Lite interruption, accounts for unreported model output, and emits deferred tool namespaces in developer input. Custom providers may explicitly opt into Cyber programs."
+        },
+        {
+          "from": "rust-v0.167.0",
+          "to": "rust-v0.167.1",
+          "source_commit": "0a94398fa60c4fac0e7659e4213a0a36e613dd46",
+          "tag_object": "595a35e837a1b6752e60a5de85b89adf415b0ccb",
+          "tree_comparison": {
+            "added": 2,
+            "removed": 0,
+            "modified": 9
+          },
+          "native_linux_asset_sha256": {
+            "codex": "dd5bfdf19d794dcc6fb482d2d5a2d9fb31d11f6caa44b303bb72890d461e8a02"
+          },
+          "summary": "Qualifies separate Lite and Bedrock-only regular Responses incremental-tool gates. Hosted web_search stays in top-level tools during turns and compaction; incremental definitions, removals and restored tools retain their native history ordering. Regular OpenAI and local-provider launches retain their existing tool layout. Stable app-server lifecycle schema digests are unchanged."
         }
       ],
       "app_server_protocol": {
@@ -3814,19 +3928,13 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.167.0",
-      "name": "0.167.0",
-      "published_at": "2026-11-06T01:40:00Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.167.0",
+      "tag_name": "rust-v0.167.1",
+      "name": "0.167.1",
+      "published_at": "2026-11-10T21:32:01Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.167.1",
       "body_head": [
-        "## New Features",
-        "- Open the agent command center with `codex agents --no-daemon`. The command center and session picker now mark unread results (#58238, #58239, #58263, #58264).",
-        "- Switch between connected backends from the terminal session picker and keep your drafts when switching (#58280, #58457).",
-        "- Preview local image attachments while composing on supported terminals, and open viewed local images from clickable transcript paths (#58261, #58446).",
-        "- Find API key and cloud provider options under \u201cSign in another way.\u201d Enable `gcp_setup_wizard` to set up Google Cloud Vertex AI with Application Default Credentials or a credential file (#57857, #58427).",
-        "- Opt into macOS or Windows system proxy settings from `/experimental` (#58157).",
-        "- Expand patch details directly in the transcript while an approval prompt is open (#58281).",
-        "## Bug Fixes"
+        "## Changelog",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.167.0...rust-v0.167.1"
       ]
     }
   },

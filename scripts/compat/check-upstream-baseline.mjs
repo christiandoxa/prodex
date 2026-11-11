@@ -7,6 +7,8 @@ import { repoRoot } from "../npm/common.mjs";
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
 
 const REQUIRED_CRITICAL_FILES = [
+  "codex-rs/core/src/session/world_state.rs",
+  "codex-rs/core/src/session/step_context.rs",
   "codex-rs/core/src/client.rs",
   "codex-rs/core/src/compact_remote_v2.rs",
   "codex-rs/core/src/compact_remote_v2_attempt.rs",
@@ -104,6 +106,21 @@ const REQUIRED_CRITICAL_FILES = [
 ];
 
 const REQUIRED_FILE_CONTAINS = {
+  "codex-rs/core/src/session/world_state.rs": [
+    "if step_context.incremental_tools_feature().is_none() {",
+    "self.preserve_parent_tool_declarations()",
+    "if incremental_tools && !preserve_parent_tool_declarations {",
+    ".filter(|tool| !matches!(tool, ToolSpec::WebSearch { .. }))",
+    "let definitions = codex_tools::create_tools_json_for_responses_lite(&specs)?;",
+  ],
+  "codex-rs/core/src/session/step_context.rs": [
+    "pub(crate) fn incremental_tools_feature(&self) -> Option<Feature>",
+    "if self.settings.model_info.use_responses_lite {",
+    "Some(Feature::IncrementalTools)",
+    "self.turn.config.model_provider_id.as_str(),\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID",
+    ".then_some(Feature::IncrementalToolsLegacy)",
+    "self.incremental_tools_feature()\n            .is_some_and(|feature| self.turn.config.features.enabled(feature))",
+  ],
   "codex-rs/codex-api/src/lib.rs": [
     "pub const RESPONSES_PATH: &str = \"/responses\";",
   ],
@@ -199,6 +216,13 @@ const REQUIRED_FILE_CONTAINS = {
     "match event?",
   ],
   "codex-rs/core/src/compact_remote_v2_attempt.rs": [
+    "step_context.incremental_tools_feature().is_some()",
+    "history.has_tool_declarations()",
+    "snapshot.has_tool_declarations()",
+    "ResponseItem::AdditionalTools { .. }",
+    "tools: if tools_in_history {",
+    ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))",
+    "ResponseItem::CompactionTrigger {}",
     "ResponseItem::CompactionTrigger {}",
     "CompactionTurnMetadata",
     "compaction_responses_metadata",
@@ -612,6 +636,8 @@ const REQUIRED_FILE_CONTAINS = {
     "feature_requirements",
   ],
   "codex-rs/features/src/lib.rs": [
+    "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+    "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,",
     "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
     "RespectSystemProxy",
@@ -1130,6 +1156,10 @@ const REQUIRED_FILE_CONTAINS = {
     "let provider_filter = picker_provider_filter(config, &app_server).await?;",
   ],
   "codex-rs/core/src/session/turn.rs": [
+    "pub(crate) fn build_prompt(",
+    "tools: if incremental_tools {",
+    ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))",
+    "step_context.tool_router.model_visible_specs()",
     ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
     "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
     "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
@@ -1244,6 +1274,65 @@ const REQUIRED_STREAM_EVENTS = [
 const COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS = 2;
 
 const REQUIRED_SEMANTIC_CHECKS = [
+  {
+    "id": "compact.incremental-tools-hosted-web-search",
+    "kind": "request_context",
+    "file": "codex-rs/core/src/compact_remote_v2_attempt.rs",
+    "file_contains_all": [
+      "step_context.incremental_tools_feature().is_some()",
+      "history.has_tool_declarations()",
+      "snapshot.has_tool_declarations()",
+      "ResponseItem::AdditionalTools { .. }",
+      "tools: if tools_in_history {",
+      ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))",
+      "ResponseItem::CompactionTrigger {}"
+    ]
+  },
+  {
+    "id": "responses.incremental-tools-hosted-web-search",
+    "kind": "request_context",
+    "file": "codex-rs/core/src/session/turn.rs",
+    "file_contains_all": [
+      "pub(crate) fn build_prompt(",
+      "tools: if incremental_tools {",
+      ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))",
+      "step_context.tool_router.model_visible_specs()"
+    ]
+  },
+  {
+    "id": "context.incremental-tools-history-layout",
+    "kind": "context_boundary",
+    "file": "codex-rs/core/src/session/world_state.rs",
+    "file_contains_all": [
+      "if step_context.incremental_tools_feature().is_none() {",
+      "self.preserve_parent_tool_declarations()",
+      "if incremental_tools && !preserve_parent_tool_declarations {",
+      ".filter(|tool| !matches!(tool, ToolSpec::WebSearch { .. }))",
+      "let definitions = codex_tools::create_tools_json_for_responses_lite(&specs)?;"
+    ]
+  },
+  {
+    "id": "context.incremental-tools-provider-boundary",
+    "kind": "provider_capabilities",
+    "file": "codex-rs/core/src/session/step_context.rs",
+    "file_contains_all": [
+      "pub(crate) fn incremental_tools_feature(&self) -> Option<Feature>",
+      "if self.settings.model_info.use_responses_lite {",
+      "Some(Feature::IncrementalTools)",
+      "self.turn.config.model_provider_id.as_str(),\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID",
+      ".then_some(Feature::IncrementalToolsLegacy)",
+      "self.incremental_tools_feature()\n            .is_some_and(|feature| self.turn.config.features.enabled(feature))"
+    ]
+  },
+  {
+    "id": "features.incremental-tools-independent-gates",
+    "kind": "feature_gate",
+    "file": "codex-rs/features/src/lib.rs",
+    "file_contains_all": [
+      "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+      "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+    ]
+  },
   {
     id: "responses.http-route",
     kind: "route",
@@ -3426,6 +3515,11 @@ function runSelfTest() {
 
   // Retained and newly qualified contracts must reject the loss of a source marker.
   for (const id of [
+    "compact.incremental-tools-hosted-web-search",
+    "responses.incremental-tools-hosted-web-search",
+    "context.incremental-tools-history-layout",
+    "context.incremental-tools-provider-boundary",
+    "features.incremental-tools-independent-gates",
     "cyber-access-program.provider-capability",
     "tui.resume-across-providers",
     "core.subagent-spawn-edge",
