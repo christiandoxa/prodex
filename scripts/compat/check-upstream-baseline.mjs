@@ -7,6 +7,9 @@ import { repoRoot } from "../npm/common.mjs";
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
 
 const REQUIRED_CRITICAL_FILES = [
+  "codex-rs/core/tests/suite/compact_remote.rs",
+  "codex-rs/core/tests/suite/gcp.rs",
+  "codex-rs/core/tests/suite/scenarios_incremental_tools.rs",
   "codex-rs/core/src/session/world_state.rs",
   "codex-rs/core/src/session/step_context.rs",
   "codex-rs/core/src/client.rs",
@@ -106,6 +109,26 @@ const REQUIRED_CRITICAL_FILES = [
 ];
 
 const REQUIRED_FILE_CONTAINS = {
+  "codex-rs/core/tests/suite/compact_remote.rs": [
+    "provider_automatic_compaction_uses_v2_responses_endpoint",
+    ".enable(Feature::IncrementalToolsLegacyGcp)",
+    "assert!(!request.inputs_of_type(\"additional_tools\").is_empty());",
+    "request.header(\"x-openai-internal-codex-responses-lite\")"
+  ],
+  "codex-rs/core/tests/suite/gcp.rs": [
+    ".set_enabled(Feature::IncrementalToolsLegacyGcp, incremental_tools)",
+    ".set_enabled(Feature::IncrementalToolsLegacy, !incremental_tools)",
+    "assert_eq!(additional_tools.len(), usize::from(incremental_tools));",
+    "assert!(top_level_tools.is_empty());",
+    "responses::namespace_child_tool(&additional_tools[0], \"functions\", \"exec_command\")"
+  ],
+  "codex-rs/core/tests/suite/scenarios_incremental_tools.rs": [
+    "#[test_case(false, None, true, GCP_PROVIDER_ID, &[]; \"gcp_default\")]",
+    "&[(Feature::IncrementalToolsLegacyGcp, false), (Feature::IncrementalToolsLegacy, true)]; \"gcp_opt_out\")]",
+    "current[\"input\"]",
+    "starts_with(prefix)",
+    "test.codex.submit(Op::Compact).await?"
+  ],
   "codex-rs/core/src/session/world_state.rs": [
     "if step_context.incremental_tools_feature().is_none() {",
     "self.preserve_parent_tool_declarations()",
@@ -117,8 +140,8 @@ const REQUIRED_FILE_CONTAINS = {
     "pub(crate) fn incremental_tools_feature(&self) -> Option<Feature>",
     "if self.settings.model_info.use_responses_lite {",
     "Some(Feature::IncrementalTools)",
-    "self.turn.config.model_provider_id.as_str(),\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID",
-    ".then_some(Feature::IncrementalToolsLegacy)",
+    "match self.turn.config.model_provider_id.as_str() {\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID => {\n                    Some(Feature::IncrementalToolsLegacy)\n                }\n                GCP_PROVIDER_ID => Some(Feature::IncrementalToolsLegacyGcp),\n                _ => None,",
+    "GCP_PROVIDER_ID => Some(Feature::IncrementalToolsLegacyGcp)",
     "self.incremental_tools_feature()\n            .is_some_and(|feature| self.turn.config.features.enabled(feature))",
   ],
   "codex-rs/codex-api/src/lib.rs": [
@@ -637,7 +660,8 @@ const REQUIRED_FILE_CONTAINS = {
   ],
   "codex-rs/features/src/lib.rs": [
     "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-    "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,",
+    "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: false,",
+    "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
     "RespectSystemProxy",
@@ -1275,6 +1299,41 @@ const COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS = 2;
 
 const REQUIRED_SEMANTIC_CHECKS = [
   {
+    "id": "gcp.incremental-remote-compaction",
+    "kind": "request_context",
+    "file": "codex-rs/core/tests/suite/compact_remote.rs",
+    "file_contains_all": [
+      "provider_automatic_compaction_uses_v2_responses_endpoint",
+      ".enable(Feature::IncrementalToolsLegacyGcp)",
+      "assert!(!request.inputs_of_type(\"additional_tools\").is_empty());",
+      "request.header(\"x-openai-internal-codex-responses-lite\")"
+    ]
+  },
+  {
+    "id": "gcp.incremental-native-tool-identity",
+    "kind": "request_context",
+    "file": "codex-rs/core/tests/suite/gcp.rs",
+    "file_contains_all": [
+      ".set_enabled(Feature::IncrementalToolsLegacyGcp, incremental_tools)",
+      ".set_enabled(Feature::IncrementalToolsLegacy, !incremental_tools)",
+      "assert_eq!(additional_tools.len(), usize::from(incremental_tools));",
+      "assert!(top_level_tools.is_empty());",
+      "responses::namespace_child_tool(&additional_tools[0], \"functions\", \"exec_command\")"
+    ]
+  },
+  {
+    "id": "gcp.incremental-default-and-opt-out",
+    "kind": "provider_capabilities",
+    "file": "codex-rs/core/tests/suite/scenarios_incremental_tools.rs",
+    "file_contains_all": [
+      "#[test_case(false, None, true, GCP_PROVIDER_ID, &[]; \"gcp_default\")]",
+      "&[(Feature::IncrementalToolsLegacyGcp, false), (Feature::IncrementalToolsLegacy, true)]; \"gcp_opt_out\")]",
+      "current[\"input\"]",
+      "starts_with(prefix)",
+      "test.codex.submit(Op::Compact).await?"
+    ]
+  },
+  {
     "id": "compact.incremental-tools-hosted-web-search",
     "kind": "request_context",
     "file": "codex-rs/core/src/compact_remote_v2_attempt.rs",
@@ -1319,8 +1378,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "pub(crate) fn incremental_tools_feature(&self) -> Option<Feature>",
       "if self.settings.model_info.use_responses_lite {",
       "Some(Feature::IncrementalTools)",
-      "self.turn.config.model_provider_id.as_str(),\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID",
-      ".then_some(Feature::IncrementalToolsLegacy)",
+      "match self.turn.config.model_provider_id.as_str() {\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID => {\n                    Some(Feature::IncrementalToolsLegacy)\n                }\n                GCP_PROVIDER_ID => Some(Feature::IncrementalToolsLegacyGcp),\n                _ => None,",
+      "GCP_PROVIDER_ID => Some(Feature::IncrementalToolsLegacyGcp)",
       "self.incremental_tools_feature()\n            .is_some_and(|feature| self.turn.config.features.enabled(feature))"
     ]
   },
@@ -1330,7 +1389,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     "file": "codex-rs/features/src/lib.rs",
     "file_contains_all": [
       "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-      "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+      "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: false,"
     ]
   },
   {
@@ -3515,6 +3574,9 @@ function runSelfTest() {
 
   // Retained and newly qualified contracts must reject the loss of a source marker.
   for (const id of [
+    "gcp.incremental-remote-compaction",
+    "gcp.incremental-native-tool-identity",
+    "gcp.incremental-default-and-opt-out",
     "compact.incremental-tools-hosted-web-search",
     "responses.incremental-tools-hosted-web-search",
     "context.incremental-tools-history-layout",

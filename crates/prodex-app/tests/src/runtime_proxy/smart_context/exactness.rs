@@ -312,8 +312,9 @@ fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
 }
 
 #[test]
-fn smart_context_codex_01671_preserves_incremental_tools_and_hosted_search() {
-    for compaction in [false, true] {
+fn smart_context_preserves_incremental_tools_and_hosted_search() {
+    for (compaction, hosted_search) in [(false, false), (false, true), (true, false), (true, true)]
+    {
         let shared = smart_context_test_shared("codex-incremental-tools");
         register_runtime_smart_context_proxy_state(&shared, true, None, None);
         smart_context_observe_minimal_budget(&shared);
@@ -346,6 +347,10 @@ fn smart_context_codex_01671_preserves_incremental_tools_and_hosted_search() {
                 {"type": "function_call_output", "call_id": "call_second", "output": repeated}
             ]
         });
+        // Vertex has no hosted search; Lite/Bedrock may retain it at top level.
+        if !hosted_search {
+            original["tools"] = serde_json::json!([]);
+        }
         if compaction {
             original["input"]
                 .as_array_mut()

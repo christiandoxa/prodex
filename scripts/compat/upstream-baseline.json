@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.167.1 release",
+      "baseline_source": "openai/codex rust-v0.167.2 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -546,7 +546,8 @@
             "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
             "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: false,",
+            "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,"
           ]
         },
         {
@@ -1025,7 +1026,7 @@
         },
         {
           "path": "codex-rs/core/src/session/environment.rs",
-          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner’s first configuration or failure without overwriting a child configuration that already won.",
+          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner\u2019s first configuration or failure without overwriting a child configuration that already won.",
           "required_contains": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -1462,13 +1463,13 @@
         },
         {
           "path": "codex-rs/core/src/session/step_context.rs",
-          "reason": "Only Lite or explicit Bedrock provider IDs may put top-level tool definitions in history. Local and regular OpenAI routes must retain their full top-level catalogs.",
+          "reason": "Responses Lite, Bedrock, and Vertex select independent incremental-tool flags. Regular OpenAI and custom local routes remain outside legacy incremental declarations.",
           "required_contains": [
             "pub(crate) fn incremental_tools_feature(&self) -> Option<Feature>",
             "if self.settings.model_info.use_responses_lite {",
             "Some(Feature::IncrementalTools)",
-            "self.turn.config.model_provider_id.as_str(),\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID",
-            ".then_some(Feature::IncrementalToolsLegacy)",
+            "match self.turn.config.model_provider_id.as_str() {\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID => {\n                    Some(Feature::IncrementalToolsLegacy)\n                }\n                GCP_PROVIDER_ID => Some(Feature::IncrementalToolsLegacyGcp),\n                _ => None,",
+            "GCP_PROVIDER_ID => Some(Feature::IncrementalToolsLegacyGcp)",
             "self.incremental_tools_feature()\n            .is_some_and(|feature| self.turn.config.features.enabled(feature))"
           ]
         },
@@ -1481,6 +1482,38 @@
             "if incremental_tools && !preserve_parent_tool_declarations {",
             ".filter(|tool| !matches!(tool, ToolSpec::WebSearch { .. }))",
             "let definitions = codex_tools::create_tools_json_for_responses_lite(&specs)?;"
+          ]
+        },
+        {
+          "path": "codex-rs/core/tests/suite/scenarios_incremental_tools.rs",
+          "reason": "Pinned upstream scenarios preserve history prefixes for default-on GCP and independent GCP opt-out while Bedrock remains opt-in.",
+          "required_contains": [
+            "#[test_case(false, None, true, GCP_PROVIDER_ID, &[]; \"gcp_default\")]",
+            "&[(Feature::IncrementalToolsLegacyGcp, false), (Feature::IncrementalToolsLegacy, true)]; \"gcp_opt_out\")]",
+            "current[\"input\"]",
+            "starts_with(prefix)",
+            "test.codex.submit(Op::Compact).await?"
+          ]
+        },
+        {
+          "path": "codex-rs/core/tests/suite/gcp.rs",
+          "reason": "Vertex keeps namespaces, client tool search, and exec_command when declarations move from tools into additional_tools. Its own feature gate is independent of Bedrock.",
+          "required_contains": [
+            ".set_enabled(Feature::IncrementalToolsLegacyGcp, incremental_tools)",
+            ".set_enabled(Feature::IncrementalToolsLegacy, !incremental_tools)",
+            "assert_eq!(additional_tools.len(), usize::from(incremental_tools));",
+            "assert!(top_level_tools.is_empty());",
+            "responses::namespace_child_tool(&additional_tools[0], \"functions\", \"exec_command\")"
+          ]
+        },
+        {
+          "path": "codex-rs/core/tests/suite/compact_remote.rs",
+          "reason": "Native Vertex remote compaction uses the regular Responses endpoint and preserves incremental declarations without claiming Responses Lite transport.",
+          "required_contains": [
+            "provider_automatic_compaction_uses_v2_responses_endpoint",
+            ".enable(Feature::IncrementalToolsLegacyGcp)",
+            "assert!(!request.inputs_of_type(\"additional_tools\").is_empty());",
+            "request.header(\"x-openai-internal-codex-responses-lite\")"
           ]
         }
       ],
@@ -2563,7 +2596,7 @@
           "id": "core.subagent-pending-environment-inheritance",
           "kind": "environment_inheritance",
           "file": "codex-rs/core/src/session/environment.rs",
-          "reason": "Pending subagent environments must inherit the owner’s first ready/failure result without overwriting a child winner.",
+          "reason": "Pending subagent environments must inherit the owner\u2019s first ready/failure result without overwriting a child winner.",
           "file_contains_all": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -3383,23 +3416,24 @@
           "id": "features.incremental-tools-independent-gates",
           "kind": "feature_gate",
           "file": "codex-rs/features/src/lib.rs",
-          "reason": "Responses Lite retains its stable enabled incremental_tools feature; regular Bedrock Responses has a separate disabled opt-in.",
+          "reason": "Responses Lite and Vertex are independently enabled by default. Stable Bedrock legacy remains disabled; GCP opt-out does not toggle Bedrock.",
           "file_contains_all": [
             "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: false,",
+            "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,"
           ]
         },
         {
           "id": "context.incremental-tools-provider-boundary",
           "kind": "provider_capabilities",
           "file": "codex-rs/core/src/session/step_context.rs",
-          "reason": "Only Lite or explicit Bedrock provider IDs may put top-level tool definitions in history. Local and regular OpenAI routes must retain their full top-level catalogs.",
+          "reason": "Native route IDs select independent Lite, Bedrock and GCP feature gates; no legacy gate is applied to regular OpenAI or custom local providers.",
           "file_contains_all": [
             "pub(crate) fn incremental_tools_feature(&self) -> Option<Feature>",
             "if self.settings.model_info.use_responses_lite {",
             "Some(Feature::IncrementalTools)",
-            "self.turn.config.model_provider_id.as_str(),\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID",
-            ".then_some(Feature::IncrementalToolsLegacy)",
+            "match self.turn.config.model_provider_id.as_str() {\n                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID => {\n                    Some(Feature::IncrementalToolsLegacy)\n                }\n                GCP_PROVIDER_ID => Some(Feature::IncrementalToolsLegacyGcp),\n                _ => None,",
+            "GCP_PROVIDER_ID => Some(Feature::IncrementalToolsLegacyGcp)",
             "self.incremental_tools_feature()\n            .is_some_and(|feature| self.turn.config.features.enabled(feature))"
           ]
         },
@@ -3442,9 +3476,47 @@
             ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))",
             "ResponseItem::CompactionTrigger {}"
           ]
+        },
+        {
+          "id": "gcp.incremental-default-and-opt-out",
+          "kind": "provider_capabilities",
+          "file": "codex-rs/core/tests/suite/scenarios_incremental_tools.rs",
+          "reason": "Pinned upstream scenarios preserve history prefixes for default-on GCP and independent GCP opt-out while Bedrock remains opt-in.",
+          "file_contains_all": [
+            "#[test_case(false, None, true, GCP_PROVIDER_ID, &[]; \"gcp_default\")]",
+            "&[(Feature::IncrementalToolsLegacyGcp, false), (Feature::IncrementalToolsLegacy, true)]; \"gcp_opt_out\")]",
+            "current[\"input\"]",
+            "starts_with(prefix)",
+            "test.codex.submit(Op::Compact).await?"
+          ]
+        },
+        {
+          "id": "gcp.incremental-native-tool-identity",
+          "kind": "request_context",
+          "file": "codex-rs/core/tests/suite/gcp.rs",
+          "reason": "Vertex keeps namespaces, client tool search, and exec_command when declarations move from tools into additional_tools. Its own feature gate is independent of Bedrock.",
+          "file_contains_all": [
+            ".set_enabled(Feature::IncrementalToolsLegacyGcp, incremental_tools)",
+            ".set_enabled(Feature::IncrementalToolsLegacy, !incremental_tools)",
+            "assert_eq!(additional_tools.len(), usize::from(incremental_tools));",
+            "assert!(top_level_tools.is_empty());",
+            "responses::namespace_child_tool(&additional_tools[0], \"functions\", \"exec_command\")"
+          ]
+        },
+        {
+          "id": "gcp.incremental-remote-compaction",
+          "kind": "request_context",
+          "file": "codex-rs/core/tests/suite/compact_remote.rs",
+          "reason": "Native Vertex remote compaction uses the regular Responses endpoint and preserves incremental declarations without claiming Responses Lite transport.",
+          "file_contains_all": [
+            "provider_automatic_compaction_uses_v2_responses_endpoint",
+            ".enable(Feature::IncrementalToolsLegacyGcp)",
+            "assert!(!request.inputs_of_type(\"additional_tools\").is_empty());",
+            "request.header(\"x-openai-internal-codex-responses-lite\")"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.167.1",
+      "tested_codex_release": "rust-v0.167.2",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -3891,6 +3963,22 @@
             "codex": "dd5bfdf19d794dcc6fb482d2d5a2d9fb31d11f6caa44b303bb72890d461e8a02"
           },
           "summary": "Qualifies separate Lite and Bedrock-only regular Responses incremental-tool gates. Hosted web_search stays in top-level tools during turns and compaction; incremental definitions, removals and restored tools retain their native history ordering. Regular OpenAI and local-provider launches retain their existing tool layout. Stable app-server lifecycle schema digests are unchanged."
+        },
+        {
+          "from": "rust-v0.167.1",
+          "to": "rust-v0.167.2",
+          "source_commit": "ce21072c90d32c40af7a55b60b2fb35c84a43a6a",
+          "tag_object": "08a3b12b3298577534a28b62ed976acf8de66eda",
+          "summary": "Vertex regular Responses uses stable default-on incremental_tools_legacy_gcp with an independent opt-out. Bedrock incremental_tools_legacy is stable but remains disabled by default. Guard namespace/tool-search preservation, history prefix stability, and native remote compaction without changing Prodex provider routing.",
+          "tree_comparison": {
+            "modified": 7,
+            "added": 0,
+            "removed": 0
+          },
+          "native_linux_package_sha256": "3d77be1748d35a4bb0e7f8752cde3b11890c63338e8c599f01eafa4a59e17b3d",
+          "native_linux_asset_sha256": {
+            "codex": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
+          }
         }
       ],
       "app_server_protocol": {
@@ -3928,13 +4016,15 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.167.1",
-      "name": "0.167.1",
-      "published_at": "2026-11-10T21:32:01Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.167.1",
+      "tag_name": "rust-v0.167.2",
+      "name": "0.167.2",
+      "published_at": "2026-11-11T22:44:46Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.167.2",
       "body_head": [
+        "## New Features",
+        "- Codex now sends tool updates incrementally by default on Google Cloud Vertex AI. To opt out, set `incremental_tools_legacy_gcp = false` under `[features]` in `config.toml`. ([#60617](https://github.com/openai/codex/pull/60617), [#60848](https://github.com/openai/codex/pull/60848))",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.167.0...rust-v0.167.1"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.167.1...rust-v0.167.2"
       ]
     }
   },
