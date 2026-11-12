@@ -2,49 +2,51 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.167.7 - 2026-11-11
+## 0.167.8 - 2026-11-12
 
-- No grouped changes.
-# Prodex 0.167.7
+### Docs
 
-Qualify Codex CLI 0.167.1 while preserving native tool catalogs, local-model
-continuation, and compaction behavior.
+- Clarify native Vertex launch boundary (`193e603`)
+# Prodex 0.167.8
+
+Qualify Codex CLI 0.167.2 and preserve native Vertex incremental-tool behavior.
 
 ## New Features
 
-- Advance the tested Codex reference to 0.167.1. Pin the upstream release source
-  and official Linux binary digest and validate the unchanged stable app-server
-  lifecycle schemas.
-- Guard the independent incremental-tool feature gates: Responses Lite retains
-  `incremental_tools`; regular Bedrock Responses may opt into
-  `incremental_tools_legacy`. The latter remains disabled by default and does
-  not activate on regular OpenAI or local-provider routes.
+- Advance the tested Codex reference to 0.167.2 using pinned source and official binaries.
+- Guard the stable, default-on `incremental_tools_legacy_gcp` feature and its independent opt-out. Bedrock's legacy flag is now stable but remains disabled by default.
 
 ## Bug Fixes
 
-- Extend compatibility regression coverage to preserve hosted `web_search` in
-  top-level tools during incremental turns and compaction, while tool additions,
-  removal notices, and restored declarations remain intact in history.
-- Verify that Smart Context can deduplicate repeated tool output without
-  changing the incremental tool catalog, instruction prefix, or compaction
-  trigger; expanded requests must reconstruct the original JSON exactly.
+- Update compatibility assertions for native GCP tool routing, namespaces, tool search, history-prefix preservation, and remote compaction.
+- Extend Smart Context exact-reconstruction coverage to incremental requests with an empty top-level tool catalog, including compaction, while retaining hosted-search coverage.
 
 ## Compatibility and Upgrade
 
-No account, profile, or global Codex configuration migration is required by this
-qualification. The capability-based minimum Codex version remains unchanged.
-The installed Codex executable is managed separately from Prodex; use Codex
-0.167.1 for the newly qualified behavior.
+Prodex preserves upstream ownership of native GCP authentication and transport
+through `prodex run` with a GCP-configured profile. This qualification does not
+add Vertex to the Super provider picker; that picker retains its existing
+supported-provider boundary.
+Regular OpenAI and custom local endpoints are not switched to GCP incremental
+features. Existing local API-key handling, reasoning, resume, and compaction
+behavior remains unchanged. Compatible installed RTK, Codebase Memory MCP,
+Playwright MCP, and Ponytail remain automatic in Super; Presidio still asks
+for consent.
 
-Preserve the existing local `--url`, `--api-key`, and `PRODEX_LOCAL_API_KEY`
-workflow, explicit model/context settings, UUID and in-app resume, model-provided
-reasoning, and local compaction diagnostics. RTK, Codebase Memory MCP,
-Playwright MCP, and Ponytail remain automatic when installed and compatible;
-Presidio still asks for consent.
+Issue #127 reports local pre-commit profile selection exhaustion without a
+version or diagnostic log. It is not marked fixed by this release: the screenshot
+alone does not identify a safe, reproducible runtime correction. Existing bounded
+recovery, quota classification, and continuation ownership safeguards remain in place.
 
 ## Changelog
 
-Full Changelog: [0.167.6...0.167.7](https://github.com/christiandoxa/prodex/compare/0.167.6...0.167.7)
+- Qualify Kiro CLI 3.2.1 for the release's native-client validation without changing its minimum runtime policy.
+
+Full Changelog: [0.167.7...0.167.8](https://github.com/christiandoxa/prodex/compare/0.167.7...0.167.8)
+
+## 0.167.7 - 2026-11-11
+
+- No grouped changes.
 
 ## 0.167.6 - 2026-11-11
 
@@ -141,14 +143,3 @@ Full Changelog: [0.167.6...0.167.7](https://github.com/christiandoxa/prodex/comp
 ### Misc
 
 - Preserve native root session ownership (`2c86952`)
-
-## 0.166.1 - 2026-10-31
-
-### Docs
-
-- Describe the 0.166.1 optional-tool changes (`c68417d`)
-
-### Misc
-
-- Qualify tunnel-client 0.0.19 and isolate stdio policy (`3869d75`)
-- Retire Caveman and harden automatic launch (`a7d7c6a`)
