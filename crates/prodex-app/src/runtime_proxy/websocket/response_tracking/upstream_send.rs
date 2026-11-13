@@ -73,7 +73,7 @@ pub(super) fn send_runtime_websocket_upstream_request(
     );
     super::bound_runtime_websocket_precommit_io(upstream_socket, shared)?;
     if let Err(err) =
-        upstream_socket.send(WsMessage::Text(upstream_request_text.into_owned().into()))
+        send_text_with_bounded_frames(upstream_socket, upstream_request_text.into_owned().into())
     {
         websocket_session.reset();
         shared.check_precommit_deadline()?;
@@ -121,3 +121,37 @@ pub(super) fn send_runtime_websocket_upstream_request(
 
     Ok(None)
 }
+
+// Codex 0.169 splits large Responses turns into bounded frames. The local
+// websocket reader reconstructs a complete message for routing/redaction, so
+// restore that bound when forwarding rather than undoing native backpressure.
+const UPSTREAM_TEXT_FRAME_BYTES: usize = 1024 * 1024;
+
+fn send_text_with_bounded_frames<S: std::io::Read + std::io::Write>(
+    socket: &mut tungstenite::WebSocket<S>,
+    text: tungstenite::Utf8Bytes,
+) -> std::result::Result<(), tungstenite::Error> {
+    use tungstenite::protocol::frame::{
+        Frame,
+        coding::{Data, OpCode},
+    };
+    if text.len() <= UPSTREAM_TEXT_FRAME_BYTES {
+        return socket.send(WsMessage::Text(text));
+    }
+    let mut remaining = tungstenite::Bytes::from(text);
+    let mut opcode = Data::Text;
+    while !remaining.is_empty() {
+        let fragment = remaining.split_to(remaining.len().min(UPSTREAM_TEXT_FRAME_BYTES));
+        // Byte slices may split a UTF-8 code point: validation belongs to the
+        // single reassembled text message. Each send flushes before the next
+        // fragment, retaining socket backpressure and the original I/O error.
+        let frame = Frame::message(fragment, OpCode::Data(opcode), remaining.is_empty());
+        socket.send(WsMessage::Frame(frame))?;
+        opcode = Data::Continue;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "upstream_send_tests.rs"]
+mod tests;
