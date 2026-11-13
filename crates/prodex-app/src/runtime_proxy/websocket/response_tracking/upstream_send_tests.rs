@@ -1,4 +1,4 @@
-use super::*;
+use super::{UPSTREAM_TEXT_FRAME_BYTES, WsMessage, send_text_with_bounded_frames};
 use std::io::{self, Cursor, Read, Write};
 use tungstenite::protocol::Role;
 
