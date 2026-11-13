@@ -4,6 +4,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.169.0 - 2026-11-13
 
+### Runtime
+
+- Preserve bounded native websocket frames upstream (`c9a7926`)
+
 ### Misc
 
 - Retain cold-cache bootstrap with cache-first Playwright (`df2fa86`)
@@ -22,6 +26,8 @@ and transport behavior in ordinary Prodex and Super launches.
   metadata, inference-hook errors, and file-backed audio alternatives.
 
 ## Bug Fixes
+
+- Restore the native 1 MiB upstream WebSocket frame bound after request routing and redaction. Large Unicode requests remain one text message, with backpressure between frames and unchanged transport failure/affinity handling.
 
 - Prefer cached npm metadata for default Playwright discovery, Super startup and expose aliases. This avoids redundant registry refreshes for prepared packages while retaining cold-cache bootstrap, no-install behavior and explicit user MCP configuration.
 
