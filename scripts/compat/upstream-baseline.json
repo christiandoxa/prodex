@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.167.2 release",
+      "baseline_source": "openai/codex rust-v0.169.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -49,7 +49,7 @@
             "x-codex-ws-stream-request-start-ms",
             "prepare_response_items_for_request",
             "responses_request_properties_mismatch",
-            "auth_owner_generation",
+            "auth_owner: Option<AuthOwner>",
             "take_cached_websocket_session",
             "build_responses_request",
             "responses_session_id",
@@ -68,7 +68,13 @@
             "PromptCacheKey::SessionDerived => Some(self.session_derived_cache_key(metadata))",
             "PromptCacheKey::Custom(key) => Some(key.clone())",
             "PromptCacheKey::Omit => None",
-            "prompt_cache_key: self.prompt_cache_key(responses_metadata)"
+            "prompt_cache_key: self.prompt_cache_key(responses_metadata)",
+            "if websocket_session.auth_owner != auth_owner",
+            "if runtime_id.is_some()",
+            "self.websocket_session.auth_owner != auth_owner",
+            "!owner.is_current()",
+            "self.turn_state = Arc::new(OnceLock::new());",
+            "prompt_cache_options_changed"
           ]
         },
         {
@@ -83,11 +89,11 @@
             "image_budget: RetainedImageBudget",
             "RetainedImageBudget::Enabled",
             "truncate_retained_messages",
-            "images::truncate_message_to_token_budget",
+            "media::truncate_message_to_token_budget",
             "remaining = 0",
             "CodexErrorDetails::ResponseIncomplete(incomplete)",
             "CompactionRequestKind::Background(_)",
-            "sess.record_rollout_budget_usage(usage).await",
+            "record_rollout_budget_usage(&turn_context.sub_id, usage)",
             "sess.record_incomplete_response_usage(",
             "match event?"
           ]
@@ -211,10 +217,7 @@
           "required_contains": [
             "resolve_provider_auth",
             "!provider.requires_openai_auth && provider.auth.is_none()",
-            "unauthenticated_auth_provider",
-            "custom_provider_does_not_inherit_ambient_auth_headers",
-            "custom_provider_uses_explicit_bearer_instead_of_ambient_auth",
-            "openai_provider_preserves_ambient_auth_headers"
+            "unauthenticated_auth_provider"
           ]
         },
         {
@@ -313,18 +316,7 @@
           "path": "codex-rs/model-provider/src/provider.rs",
           "reason": "Owns provider capability wiring plus the first-party-only internal metadata destination gate. Codex 0.159 relocates that security boundary from core/client.rs while retaining HTTPS OpenAI/allowed-ChatGPT semantics.",
           "required_contains": [
-            "RemoteCompactionSupport",
             "ProviderCapabilities",
-            "remote_compaction",
-            "RemoteCompactionSupport::V2",
-            "amazon_bedrock_provider_creates_static_models_manager",
-            "openai.gpt-5.5",
-            "openai.gpt-5.6-sol",
-            "openai.gpt-5.6-terra",
-            "openai.gpt-5.6-luna",
-            "openai.gpt-6.1-sol",
-            "openai.gpt-6-sol",
-            "openai.gpt-6-luna",
             "fn include_internal_metadata",
             "self.info().include_internal_metadata",
             "url.scheme() == \"https\"",
@@ -487,7 +479,11 @@
             "headers: Option<Value>,",
             "error.headers.as_ref()",
             "headers.as_ref(),",
-            "find_map(|headers| RetryAfter::from_headers(&json_headers_to_http_headers(headers)))"
+            "find_map(|headers| RetryAfter::from_headers(&json_headers_to_http_headers(headers)))",
+            "const FRAGMENT_SIZE: usize = 1024 * 1024",
+            "Frame::message_fragment(payload, opcode, fragment)",
+            "opcode = Data::Continue",
+            "large_turn_is_one_text_message_in_bounded_frames"
           ]
         },
         {
@@ -638,7 +634,7 @@
             "supports_standalone_web_search",
             "web_search_mode",
             "WebSearchMode::Disabled",
-            "create_model_provider",
+            "auth.model_provider(config.provider.clone())",
             "WebSearchTool"
           ]
         },
@@ -715,7 +711,13 @@
             "daybreak::program_for_turn(",
             "None => None,",
             "daybreak_override",
-            "ClientRequest::TurnStart"
+            "ClientRequest::TurnStart",
+            "if cli.trust && cli.ignore_user_config",
+            "if trust {",
+            "Some(TrustLevel::Untrusted) => anyhow::bail!",
+            "set_project_trust_level(project.trust_key, TrustLevel::Trusted)",
+            "default_cwd: Some(config.cwd.clone())",
+            "warning: Untrusted project-local configuration is disabled"
           ]
         },
         {
@@ -853,7 +855,11 @@
             "let restore_summary = !has_override(\"model_reasoning_summary\")",
             "config.service_tier.clone_from(&settings.service_tier)",
             "config.model_reasoning_summary = settings.reasoning_summary",
-            "existing_thread.resume_config_snapshot().await"
+            "existing_thread.resume_config_snapshot().await",
+            "fn merge_persisted_resume_metadata",
+            "if typesafe_overrides.model_provider.is_none()",
+            "overrides.contains_key(\"model_provider\")",
+            "typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone())"
           ]
         },
         {
@@ -948,20 +954,14 @@
         },
         {
           "path": "codex-rs/tui/src/security_setup.rs",
-          "reason": "Codex 0.159.3 security reminders must stay bound to the locally authenticated ChatGPT identity and Codex-owned ChatGPT bootstrap origin; Prodex model-proxy routing must not replace this account/read path.",
+          "reason": "The TUI requests security notices from app-server and checks the current identity plus the HTTPS ChatGPT-only action URL.",
           "required_contains": [
-            "Optional account-security reminders for the local, ChatGPT-authenticated CLI.",
             "config.model_provider_id != \"openai\" || server.uses_remote_workspace()",
-            "ClientRequest::GetAuthStatus",
-            "GetAuthStatusParams",
-            "!matches!(auth, CodexAuth::Chatgpt(_)) || auth.is_fedramp_account()",
-            "status.auth_method != Some(AuthMode::Chatgpt)",
-            "status.auth_token.as_deref() != Some(saved_token.as_str())",
-            "RouteAwareClientPool::new_without_redirects",
-            "{}/wham/security-setup",
-            "config.chatgpt_base_url.trim_end_matches('/')",
-            "auth_provider_from_auth(&auth)\n                        .to_auth_headers()\n                        .ok()?",
+            "ClientRequest::GetAccountSecuritySetup",
+            "GetAccountSecuritySetupResponse",
+            "Identity::from_auth(&current).as_ref() != Some(&identity)",
             "url.host_str() == Some(\"chatgpt.com\")",
+            "url.scheme() == \"https\"",
             "Duration::from_secs(3)"
           ]
         },
@@ -1026,7 +1026,7 @@
         },
         {
           "path": "codex-rs/core/src/session/environment.rs",
-          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner\u2019s first configuration or failure without overwriting a child configuration that already won.",
+          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner’s first configuration or failure without overwriting a child configuration that already won.",
           "required_contains": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -1181,7 +1181,13 @@
             "WorldStateUpdate::prefix_item",
             "self.messages.removed_namespaces_header.as_str()",
             "self.messages.removed_tools_header.as_str()",
-            "Some(self.hashes.clone())"
+            "(Some(snapshot), updates)",
+            "pub(crate) enum TopLevelToolsSnapshot",
+            "TopLevelToolsSnapshot::ToolsOnly(self.hashes.clone())",
+            "TopLevelToolsSnapshot::WithExec {",
+            "\"tools.incremental_update\"",
+            "WorldStateUpdate::fragment(update).standalone()",
+            "RemovedExecDefinitions"
           ]
         },
         {
@@ -1277,7 +1283,12 @@
             "Ok(ResponseEvent::OutputItemDone(item)) => output.push(item)",
             "for item in std::mem::take(&mut output)",
             "sess.record_annotated_conversation_items",
-            "sess.record_observed_response_completed"
+            "sess.record_observed_response_completed",
+            "let Some(delay) = e.retry_delay(retries) else",
+            "let retry_after = e.retry_after()",
+            "map(RetryAfter::deadline)",
+            "tokio::time::sleep_until(retry_at).await",
+            "Err(e) => return Err(e)"
           ]
         },
         {
@@ -1367,7 +1378,17 @@
           "required_contains": [
             "| CodexErrorDetails::ModelNotFound { .. }",
             "CodexErrorDetails::ModelNotFound { .. } => CodexErrorInfo::ModelNotFound",
-            "CodexErrorDetails::ModelNotFound { status, .. } => *status"
+            "CodexErrorDetails::ModelNotFound { status, .. }\n            | CodexErrorDetails::ContentPolicyViolation { status, .. } => *status",
+            "pub fn is_runtime_auth_denial",
+            "StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN",
+            "\"runtime_assertion_invalid\"",
+            "\"runtime_instance_paused\"",
+            "\"runtime_instance_revoked\"",
+            "\"invalid_agent_instance_assertion\"",
+            "| CodexErrorDetails::WorkspaceAccessDenied(_)",
+            "| CodexErrorDetails::AccessProgramNotEnabled(_)",
+            "| CodexErrorDetails::InferenceHookDenied { .. }",
+            "| CodexErrorDetails::ContentPolicyViolation { .. }"
           ]
         },
         {
@@ -1514,6 +1535,73 @@
             ".enable(Feature::IncrementalToolsLegacyGcp)",
             "assert!(!request.inputs_of_type(\"additional_tools\").is_empty());",
             "request.header(\"x-openai-internal-codex-responses-lite\")"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/auth_tests.rs",
+          "reason": "Owns the extracted provider-auth regressions; custom endpoints must not inherit ambient OpenAI credentials.",
+          "required_contains": [
+            "custom_provider_does_not_inherit_ambient_auth_headers",
+            "custom_provider_uses_explicit_bearer_instead_of_ambient_auth",
+            "openai_provider_preserves_ambient_auth_headers"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/provider_tests.rs",
+          "reason": "Owns the extracted static Bedrock catalog and provider capability regressions in Codex 0.169.",
+          "required_contains": [
+            "RemoteCompactionSupport",
+            "remote_compaction",
+            "RemoteCompactionSupport::V2",
+            "amazon_bedrock_provider_creates_static_models_manager",
+            "openai.gpt-5.5",
+            "openai.gpt-5.6-sol",
+            "openai.gpt-5.6-terra",
+            "openai.gpt-5.6-luna",
+            "openai.gpt-6.1-sol",
+            "openai.gpt-6-sol",
+            "openai.gpt-6-luna"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/security_setup.rs",
+          "reason": "Codex 0.169 moves security-notice fetching to app-server while preserving saved ChatGPT identity, source-generation checks, runtime auth and no-redirect transport.",
+          "required_contains": [
+            "get_account_security_setup",
+            "!matches!(saved, CodexAuth::Chatgpt(_)) || saved.is_fedramp_account()",
+            "saved.get_token().ok()? != auth.get_token().ok()?",
+            "auth_provider_for_request",
+            "resolved.bind_http_client_factory(factory)",
+            "RouteAwareClientPool::new_without_redirects",
+            "resolved.validate_headers(&headers)",
+            "{}/wham/security-setup",
+            "config.chatgpt_base_url.trim_end_matches('/')",
+            "!= source_generation",
+            "current.get_account_id().as_ref() != Some(&account_id)",
+            "current.get_chatgpt_user_id().as_ref() != Some(&user_id)"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/request_setup.rs",
+          "reason": "The resolved request binds headers, proxy/TLS configuration and redirect policy to the same credential source.",
+          "required_contains": [
+            "pub struct ResolvedProviderRequest",
+            "pub auth_owner: Option<AuthOwner>",
+            "pub async fn resolve_request",
+            "resolved_auth.validate_headers(&api_provider.headers)?",
+            "bind_http_client_factory(http_client_factory)",
+            "ClientRedirectPolicy::Reject"
+          ]
+        },
+        {
+          "path": "codex-rs/tui/src/chatwidget/mcp_startup.rs",
+          "reason": "The TUI tracks only announced MCP startup events and settles a round when no observed server remains starting.",
+          "required_contains": [
+            "fn update_mcp_startup_status",
+            "self.mcp_startup_status.is_none() && !matches!(status, McpStartupStatus::Starting)",
+            "let current = self.mcp_startup_status.as_ref()?",
+            "let first = starting.first()?",
+            "self.finish_mcp_startup();"
           ]
         }
       ],
@@ -1786,7 +1874,7 @@
             "image_budget: RetainedImageBudget",
             "RetainedImageBudget::Enabled",
             "truncate_retained_messages",
-            "images::truncate_message_to_token_budget",
+            "media::truncate_message_to_token_budget",
             "remaining = 0"
           ]
         },
@@ -1939,7 +2027,7 @@
         {
           "id": "model-provider.bedrock-static-manager-models",
           "kind": "provider_catalog",
-          "file": "codex-rs/model-provider/src/provider.rs",
+          "file": "codex-rs/model-provider/src/provider_tests.rs",
           "reason": "Codex 0.159.1 keeps GPT-5.5/5.6 and GPT-6 Sol/Luna while adding GPT-6.1 Sol to the static Bedrock manager.",
           "file_contains_all": [
             "amazon_bedrock_provider_creates_static_models_manager",
@@ -2003,7 +2091,7 @@
             "supports_standalone_web_search",
             "web_search_mode",
             "WebSearchMode::Disabled",
-            "create_model_provider",
+            "auth.model_provider(config.provider.clone())",
             "WebSearchTool"
           ]
         },
@@ -2516,18 +2604,14 @@
           "id": "tui.security-setup-auth-boundary",
           "kind": "authenticated_auxiliary_request",
           "file": "codex-rs/tui/src/security_setup.rs",
-          "reason": "The optional 0.159.3 account-security notice must verify app-server and saved ChatGPT auth identity, use the Codex-owned ChatGPT bootstrap base URL without redirects, and accept only https://chatgpt.com action URLs.",
+          "reason": "The TUI requests security notices from app-server and checks the current identity plus the HTTPS ChatGPT-only action URL.",
           "file_contains_all": [
             "config.model_provider_id != \"openai\" || server.uses_remote_workspace()",
-            "ClientRequest::GetAuthStatus",
-            "!matches!(auth, CodexAuth::Chatgpt(_)) || auth.is_fedramp_account()",
-            "status.auth_method != Some(AuthMode::Chatgpt)",
-            "status.auth_token.as_deref() != Some(saved_token.as_str())",
-            "RouteAwareClientPool::new_without_redirects",
-            "{}/wham/security-setup",
-            "config.chatgpt_base_url.trim_end_matches('/')",
-            "auth_provider_from_auth(&auth)\n                        .to_auth_headers()\n                        .ok()?",
+            "ClientRequest::GetAccountSecuritySetup",
+            "GetAccountSecuritySetupResponse",
+            "Identity::from_auth(&current).as_ref() != Some(&identity)",
             "url.host_str() == Some(\"chatgpt.com\")",
+            "url.scheme() == \"https\"",
             "Duration::from_secs(3)"
           ]
         },
@@ -2596,7 +2680,7 @@
           "id": "core.subagent-pending-environment-inheritance",
           "kind": "environment_inheritance",
           "file": "codex-rs/core/src/session/environment.rs",
-          "reason": "Pending subagent environments must inherit the owner\u2019s first ready/failure result without overwriting a child winner.",
+          "reason": "Pending subagent environments must inherit the owner’s first ready/failure result without overwriting a child winner.",
           "file_contains_all": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -2941,7 +3025,7 @@
           "file_contains_all": [
             "CodexErrorDetails::ResponseIncomplete(incomplete)",
             "CompactionRequestKind::Background(_)",
-            "sess.record_rollout_budget_usage(usage).await",
+            "record_rollout_budget_usage(&turn_context.sub_id, usage)",
             "sess.record_incomplete_response_usage(",
             "match event?"
           ]
@@ -3201,7 +3285,7 @@
           "file_contains_all": [
             "| CodexErrorDetails::ModelNotFound { .. }",
             "CodexErrorDetails::ModelNotFound { .. } => CodexErrorInfo::ModelNotFound",
-            "CodexErrorDetails::ModelNotFound { status, .. } => *status"
+            "CodexErrorDetails::ModelNotFound { status, .. }\n            | CodexErrorDetails::ContentPolicyViolation { status, .. } => *status"
           ]
         },
         {
@@ -3514,9 +3598,154 @@
             "assert!(!request.inputs_of_type(\"additional_tools\").is_empty());",
             "request.header(\"x-openai-internal-codex-responses-lite\")"
           ]
+        },
+        {
+          "id": "app-server.security-setup-runtime-auth",
+          "kind": "authenticated_auxiliary_request",
+          "file": "codex-rs/app-server/src/request_processors/account_processor/security_setup.rs",
+          "reason": "Codex 0.169 moves security-notice fetching to app-server while preserving saved ChatGPT identity, source-generation checks, runtime auth and no-redirect transport.",
+          "file_contains_all": [
+            "get_account_security_setup",
+            "!matches!(saved, CodexAuth::Chatgpt(_)) || saved.is_fedramp_account()",
+            "saved.get_token().ok()? != auth.get_token().ok()?",
+            "auth_provider_for_request",
+            "resolved.bind_http_client_factory(factory)",
+            "RouteAwareClientPool::new_without_redirects",
+            "resolved.validate_headers(&headers)",
+            "{}/wham/security-setup",
+            "config.chatgpt_base_url.trim_end_matches('/')",
+            "!= source_generation",
+            "current.get_account_id().as_ref() != Some(&account_id)",
+            "current.get_chatgpt_user_id().as_ref() != Some(&user_id)"
+          ]
+        },
+        {
+          "id": "runtime.websocket-auth-owner",
+          "kind": "request_identity",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Codex revalidates runtime credentials before reusing sockets and invalidates cached state and turn routing when the auth owner changes.",
+          "file_contains_all": [
+            "auth_owner: Option<AuthOwner>",
+            "if websocket_session.auth_owner != auth_owner",
+            "if runtime_id.is_some()",
+            "self.websocket_session.auth_owner != auth_owner",
+            "!owner.is_current()",
+            "self.turn_state = Arc::new(OnceLock::new());",
+            "prompt_cache_options_changed"
+          ]
+        },
+        {
+          "id": "runtime.resolved-request-auth",
+          "kind": "request_identity",
+          "file": "codex-rs/model-provider/src/request_setup.rs",
+          "reason": "The resolved request binds headers, proxy/TLS configuration and redirect policy to the same credential source.",
+          "file_contains_all": [
+            "pub struct ResolvedProviderRequest",
+            "pub auth_owner: Option<AuthOwner>",
+            "pub async fn resolve_request",
+            "resolved_auth.validate_headers(&api_provider.headers)?",
+            "bind_http_client_factory(http_client_factory)",
+            "ClientRedirectPolicy::Reject"
+          ]
+        },
+        {
+          "id": "responses.terminal-runtime-denials",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/protocol/src/error.rs",
+          "reason": "Runtime revocations and policy/workspace denials remain terminal, rather than becoming quota failures or infinite reconnect loops.",
+          "file_contains_all": [
+            "pub fn is_runtime_auth_denial",
+            "StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN",
+            "\"runtime_assertion_invalid\"",
+            "\"runtime_instance_paused\"",
+            "\"runtime_instance_revoked\"",
+            "\"invalid_agent_instance_assertion\"",
+            "| CodexErrorDetails::WorkspaceAccessDenied(_)",
+            "| CodexErrorDetails::AccessProgramNotEnabled(_)",
+            "| CodexErrorDetails::InferenceHookDenied { .. }",
+            "| CodexErrorDetails::ContentPolicyViolation { .. }"
+          ]
+        },
+        {
+          "id": "websocket.large-message-fragmentation",
+          "kind": "transport",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Native Responses requests may span multiple bounded frames while remaining a single text message; proxy aggregation must preserve the full payload.",
+          "file_contains_all": [
+            "const FRAGMENT_SIZE: usize = 1024 * 1024",
+            "Frame::message_fragment(payload, opcode, fragment)",
+            "opcode = Data::Continue",
+            "large_turn_is_one_text_message_in_bounded_frames"
+          ]
+        },
+        {
+          "id": "exec.explicit-project-trust",
+          "kind": "security_boundary",
+          "file": "codex-rs/exec/src/lib.rs",
+          "reason": "Writable sandboxes do not implicitly trust project configuration or project MCP servers. Explicit trust never overrides an existing untrusted decision.",
+          "file_contains_all": [
+            "if cli.trust && cli.ignore_user_config",
+            "if trust {",
+            "Some(TrustLevel::Untrusted) => anyhow::bail!",
+            "set_project_trust_level(project.trust_key, TrustLevel::Trusted)",
+            "default_cwd: Some(config.cwd.clone())",
+            "warning: Untrusted project-local configuration is disabled"
+          ]
+        },
+        {
+          "id": "resume.saved-provider-precedence",
+          "kind": "session_lifecycle",
+          "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+          "reason": "Resume restores the saved provider unless the caller explicitly selects a replacement; model/reasoning changes alone do not switch providers.",
+          "file_contains_all": [
+            "fn merge_persisted_resume_metadata",
+            "if typesafe_overrides.model_provider.is_none()",
+            "overrides.contains_key(\"model_provider\")",
+            "typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone())"
+          ]
+        },
+        {
+          "id": "mcp.authoritative-startup-rounds",
+          "kind": "session_lifecycle",
+          "file": "codex-rs/tui/src/chatwidget/mcp_startup.rs",
+          "reason": "The TUI tracks only announced MCP startup events and settles a round when no observed server remains starting.",
+          "file_contains_all": [
+            "fn update_mcp_startup_status",
+            "self.mcp_startup_status.is_none() && !matches!(status, McpStartupStatus::Starting)",
+            "let current = self.mcp_startup_status.as_ref()?",
+            "let first = starting.first()?",
+            "self.finish_mcp_startup();"
+          ]
+        },
+        {
+          "id": "context.incremental-exec-catalog",
+          "kind": "context_boundary",
+          "file": "codex-rs/core/src/context/world_state/top_level_tools.rs",
+          "reason": "Code Mode granular updates preserve tool snapshots, changed definitions and withdrawals without rewriting the stable declaration prefix.",
+          "file_contains_all": [
+            "pub(crate) enum TopLevelToolsSnapshot",
+            "TopLevelToolsSnapshot::ToolsOnly(self.hashes.clone())",
+            "TopLevelToolsSnapshot::WithExec {",
+            "\"tools.incremental_update\"",
+            "WorldStateUpdate::fragment(update).standalone()",
+            "RemovedExecDefinitions"
+          ]
+        },
+        {
+          "id": "compact.native-error-retry-policy",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/core/src/compact.rs",
+          "reason": "Local compaction delegates retry eligibility and Retry-After deadlines to the native error classifier, retaining terminal failures.",
+          "file_contains_all": [
+            "let Some(delay) = e.retry_delay(retries) else",
+            "let retry_after = e.retry_after()",
+            "map(RetryAfter::deadline)",
+            "tokio::time::sleep_until(retry_at).await",
+            "Err(e) => return Err(e)"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.167.2",
+      "tested_codex_release": "rust-v0.169.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -3979,12 +4208,29 @@
           "native_linux_asset_sha256": {
             "codex": "a9672d0fa0dd8fcf8cad136fa0d056b914bc046f5ac3d78f4a5cf390655af56b"
           }
+        },
+        {
+          "from": "rust-v0.167.2",
+          "to": "rust-v0.169.0",
+          "source_commit": "d32063f96c2dff1dc96af839b3952abb6acfeda4",
+          "tag_object": "a41fe5b443652cbdbee57717fbb9fd78d8d8b32a",
+          "source_archive_sha256": "c12b841c53c1794fe4a4fc424ef2e403cbabaa1ce3a47bb6cd08ff848dc2711f",
+          "tree_comparison": {
+            "added": 438,
+            "removed": 21,
+            "modified": 2114
+          },
+          "native_linux_package_sha256": "3b8ed091149cc63a59046b9f094bcfa21cdb4dda15ede441ce369bcee4a71ba0",
+          "native_linux_asset_sha256": {
+            "codex": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
+          },
+          "summary": "Qualifies credential-source-bound runtime auth, per-request WebSocket reauthentication, bounded 1 MiB request frames, terminal policy/auth denials, explicit noninteractive project trust, saved-provider resume precedence, authoritative MCP startup events, and incremental Code Mode definitions. Security-notice fetching moves to app-server without relaxing identity/redirect checks. Prompt-cache TTL and additive moderation/file-audio schema fields remain native-owned; no opt-in feature is forced on."
         }
       ],
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
-        "schema_hash_note": "The selected stable v2 lifecycle schema hashes come from the tested binary. The vendored JSON examples are historical fixtures last qualified for Codex 0.146.0. Experimental queue and MCP RPCs are validated with --experimental-schemas.",
+        "schema_hash_note": "The selected stable v2 lifecycle hashes come from the official Codex 0.169.0 binary. Nine schema changes add optional moderation metadata, an inference-hook error variant, and file-backed audio alternatives. Required lifecycle methods remain validated, including experimental queue and MCP RPCs with --experimental-schemas.",
         "required_methods": [
           "initialize",
           "initialized",
@@ -4000,31 +4246,35 @@
         ],
         "stable_v2_sha256": {
           "ThreadForkParams.json": "60540b97d453ddbc5e12bfaa007a3718f31847d18dec0da59a5e4b89be4717ad",
-          "ThreadForkResponse.json": "0683787777b74c158f6c9044f1eea805426c16022cea6fcdef60438ce5954bcf",
-          "ThreadResumeParams.json": "cba2b0a25e99cc2a9ea083f3ad8cea4d1a3a198922d8c2ba5224b6414eff7334",
-          "ThreadResumeResponse.json": "f450bafe946842b04e49db3e661738b52d8a64f32089fe4fe9ae9c5eab5b8498",
+          "ThreadForkResponse.json": "4ed3ca01b482c774585ac55ed9a9b85c8f6c93adae858ba497c2d618c171aea2",
+          "ThreadResumeParams.json": "cb2daef3e452f9dcb6cdd7a7a389b866ac486614558a46f3ec5538f3fe3b3ea1",
+          "ThreadResumeResponse.json": "450a6fd48542176397203b5a60581a7db86ab0d33aa979e8922873ac7df5ece5",
           "ThreadStartParams.json": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428",
-          "ThreadStartResponse.json": "dfacf835b6b46a9f087b3e89a81f44f1ed0620518a7a957a3d06681bd86b6944",
-          "ThreadStartedNotification.json": "8ca73cc588ebc155a570cd0794abc4250dee58d1b2129ffb1ff9c5c0fe1b1a46",
-          "TurnCompletedNotification.json": "00b691508bb0187ecc5f080bb1608add7137672698daed6922967ad90bcb16e1",
+          "ThreadStartResponse.json": "e54031895f7552122a79123a74bf398deb4ebf97227accc7683bae08400d3e65",
+          "ThreadStartedNotification.json": "d745023b8b64db69138fe32a42c12aafe3c367678097604803d33566a8bdc184",
+          "TurnCompletedNotification.json": "c4a22a9a8c1fad4c2dceda0d4d1593ce7f2435107d6219fb678925d18f915f6b",
           "TurnInterruptParams.json": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b",
           "TurnInterruptResponse.json": "531de6be06fe979b5963f249bab82498a175e614bf65ac12fb2e849dfe60bcf1",
-          "TurnStartParams.json": "4e25cd48986f73e600d9949a055ddb994a75b4a38790e935274646f0fece00ad",
-          "TurnStartResponse.json": "b75b88c2f507685b948d06166b5436678fd320c9878883d97f5a17f620a25116",
-          "TurnStartedNotification.json": "628bc9c1b9dc14f2e33ab374cc6203ca1e405ec1e7b5426d110cfa7f26904592"
+          "TurnStartParams.json": "7306e8a95152f1071b0fb8bcc22da20a798ae34c1c57b6d26dfafc2c2b47ee9e",
+          "TurnStartResponse.json": "e08d29ed53ac18395874d68c1b35c41e77dfc815a8aee09950462ff8098c240d",
+          "TurnStartedNotification.json": "b386381e73a8f75578310d53cba3a9384ab728f219801284d948bd9a82fc772c"
         }
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.167.2",
-      "name": "0.167.2",
-      "published_at": "2026-11-11T22:44:46Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.167.2",
+      "tag_name": "rust-v0.169.0",
+      "name": "0.169.0",
+      "published_at": "2026-11-13T08:37:05Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.169.0",
       "body_head": [
         "## New Features",
-        "- Codex now sends tool updates incrementally by default on Google Cloud Vertex AI. To opt out, set `incremental_tools_legacy_gcp = false` under `[features]` in `config.toml`. ([#60617](https://github.com/openai/codex/pull/60617), [#60848](https://github.com/openai/codex/pull/60848))",
-        "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.167.1...rust-v0.167.2"
+        "- The opt-in terminal workspace supports multiple side-chat tabs. Switch between them with the keyboard or mouse, and reopen saved local side chats after restarting Codex. (#59784, #60152, #60181)",
+        "- Search older tasks from the agent command center by name, prompt preview, or working directory. (#60286)",
+        "- Turn on **Collapse turn details** in the full-screen transcript to fold completed activity beneath each prompt while keeping answers visible and tool output searchable. (#60554, #60555, #60556, #60557)",
+        "- Add or edit custom model providers from the terminal. With custom gateway onboarding enabled, you can create a provider during sign-in and use a device code for supported gateways over SSH or without a local browser. (#59779, #60009, #60186, #60486, #60662)",
+        "- Press `Ctrl+S` in the terminal report editor to save a diagnostic ZIP locally, even when uploads are disabled. (#60542)",
+        "- With the opt-in Cloud connection on macOS and Linux, send images, choose a model and reasoning effort, and archive or restore Cloud conversations from the terminal. (#59828, #60061, #60635, #60651)",
+        "## Bug Fixes"
       ]
     }
   },

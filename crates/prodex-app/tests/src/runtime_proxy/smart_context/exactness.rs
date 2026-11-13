@@ -391,3 +391,67 @@ fn smart_context_preserves_incremental_tools_and_hosted_search() {
         ));
     }
 }
+
+#[test]
+#[cfg(feature = "mojo-quota")]
+fn smart_context_codex_01690_preserves_cache_options_and_exec_updates() {
+    for ttl in ["30m", "12h"] {
+        let shared = smart_context_test_shared("native-exec-catalog");
+        register_runtime_smart_context_proxy_state(&shared, true, None, None);
+        smart_context_observe_minimal_budget(&shared);
+        let repeated = (0..650)
+            .map(|i| format!("line {i}: repeated compiler diagnostic"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let original = serde_json::json!({
+            "model": "gpt-4o",
+            "prompt_cache_key": "synthetic-native-cache",
+            "prompt_cache_options": {"ttl": ttl},
+            "tools": [{"type": "web_search"}],
+            "input": [
+                {"type": "additional_tools", "role": "developer", "tools": [
+                    {"type": "namespace", "name": "functions", "tools": [
+                        {"type": "custom", "name": "exec", "description": "Initial catalog"}
+                    ]}
+                ]},
+                {"type": "message", "role": "developer", "content": [
+                    {"type": "input_text", "text": "## Namespace: functions\nUpdated tool definition."}
+                ], "internal_chat_message_metadata_passthrough": {
+                    "content_item_kinds": ["tools.incremental_update"]
+                }},
+                {"type": "message", "role": "developer", "content": [
+                    {"type": "input_text", "text": "The following definitions are no longer available: functions.old_tool"}
+                ]},
+                {"type": "function_call_output", "call_id": "call_native_1", "output": repeated},
+                {"type": "function_call_output", "call_id": "call_native_2", "output": repeated}
+            ]
+        });
+        let request = smart_context_test_request(original.clone());
+        let prepared = prepare_runtime_smart_context_http_body(
+            1690,
+            &request,
+            &shared,
+            RuntimeRouteKind::Responses,
+        )
+        .unwrap();
+        let Cow::Owned(body) = prepared else {
+            panic!("expected measured duplicate-output savings");
+        };
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            value["prompt_cache_options"],
+            original["prompt_cache_options"]
+        );
+        assert_eq!(value["tools"], original["tools"]);
+        assert_eq!(
+            &value["input"].as_array().unwrap()[..3],
+            &original["input"].as_array().unwrap()[..3]
+        );
+        let mut expanded =
+            runtime_smart_context_expand_inline_references(&original, &value).unwrap();
+        assert!(runtime_smart_context_inline_reference_round_trip_is_exact(
+            &original,
+            &mut expanded
+        ));
+    }
+}

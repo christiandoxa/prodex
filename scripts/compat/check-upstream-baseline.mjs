@@ -106,6 +106,11 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/session/turn.rs",
   "codex-rs/core/src/context_manager/history.rs",
   "codex-rs/core/src/context/world_state/tools.rs",
+  "codex-rs/model-provider/src/auth_tests.rs",
+  "codex-rs/model-provider/src/provider_tests.rs",
+  "codex-rs/app-server/src/request_processors/account_processor/security_setup.rs",
+  "codex-rs/model-provider/src/request_setup.rs",
+  "codex-rs/tui/src/chatwidget/mcp_startup.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -197,7 +202,7 @@ const REQUIRED_FILE_CONTAINS = {
     "responses_websockets=2026-02-06",
     "x-client-request-id",
     "stream_responses_websocket",
-    "auth_owner_generation",
+    "auth_owner: Option<AuthOwner>",
     "take_cached_websocket_session",
     "build_responses_request",
     "client_metadata",
@@ -220,6 +225,12 @@ const REQUIRED_FILE_CONTAINS = {
     "PromptCacheKey::Custom(key) => Some(key.clone())",
     "PromptCacheKey::Omit => None",
     "prompt_cache_key: self.prompt_cache_key(responses_metadata)",
+    "if websocket_session.auth_owner != auth_owner",
+    "if runtime_id.is_some()",
+    "self.websocket_session.auth_owner != auth_owner",
+    "!owner.is_current()",
+    "self.turn_state = Arc::new(OnceLock::new());",
+    "prompt_cache_options_changed",
   ],
   "codex-rs/core/src/compact_remote_v2.rs": [
     "run_remote_compact_task",
@@ -230,11 +241,11 @@ const REQUIRED_FILE_CONTAINS = {
     "image_budget: RetainedImageBudget",
     "RetainedImageBudget::Enabled",
     "truncate_retained_messages",
-    "images::truncate_message_to_token_budget",
+    "media::truncate_message_to_token_budget",
     "remaining = 0",
     "CodexErrorDetails::ResponseIncomplete(incomplete)",
     "CompactionRequestKind::Background(_)",
-    "sess.record_rollout_budget_usage(usage).await",
+    "record_rollout_budget_usage(&turn_context.sub_id, usage)",
     "sess.record_incomplete_response_usage(",
     "match event?",
   ],
@@ -349,9 +360,6 @@ const REQUIRED_FILE_CONTAINS = {
     "resolve_provider_auth",
     "!provider.requires_openai_auth && provider.auth.is_none()",
     "unauthenticated_auth_provider",
-    "custom_provider_does_not_inherit_ambient_auth_headers",
-    "custom_provider_uses_explicit_bearer_instead_of_ambient_auth",
-    "openai_provider_preserves_ambient_auth_headers",
   ],
   "codex-rs/codex-mcp/src/tools.rs": [
     "normalize_tools_for_model_with_prefix",
@@ -422,18 +430,7 @@ const REQUIRED_FILE_CONTAINS = {
     "Some(MultiAgentVersion::V2)",
   ],
   "codex-rs/model-provider/src/provider.rs": [
-    "RemoteCompactionSupport",
     "ProviderCapabilities",
-    "remote_compaction",
-    "RemoteCompactionSupport::V2",
-    "amazon_bedrock_provider_creates_static_models_manager",
-    "openai.gpt-5.5",
-    "openai.gpt-5.6-sol",
-    "openai.gpt-5.6-terra",
-    "openai.gpt-5.6-luna",
-    "openai.gpt-6.1-sol",
-    "openai.gpt-6-sol",
-    "openai.gpt-6-luna",
     "include_internal_metadata",
     "url.scheme() == \"https\"",
     "host == \"api.openai.com\"",
@@ -578,6 +575,10 @@ const REQUIRED_FILE_CONTAINS = {
     "error.headers.as_ref()",
     "headers.as_ref(),",
     "find_map(|headers| RetryAfter::from_headers(&json_headers_to_http_headers(headers)))",
+    "const FRAGMENT_SIZE: usize = 1024 * 1024",
+    "Frame::message_fragment(payload, opcode, fragment)",
+    "opcode = Data::Continue",
+    "large_turn_is_one_text_message_in_bounded_frames",
   ],
   "codex-rs/core/src/context/base_instructions.rs": [
     "pub(crate) const KIND: &str = \"model.base_instructions\";",
@@ -602,7 +603,13 @@ const REQUIRED_FILE_CONTAINS = {
     "WorldStateUpdate::prefix_item",
     "self.messages.removed_namespaces_header.as_str()",
     "self.messages.removed_tools_header.as_str()",
-    "Some(self.hashes.clone())",
+    "(Some(snapshot), updates)",
+    "pub(crate) enum TopLevelToolsSnapshot",
+    "TopLevelToolsSnapshot::ToolsOnly(self.hashes.clone())",
+    "TopLevelToolsSnapshot::WithExec {",
+    "\"tools.incremental_update\"",
+    "WorldStateUpdate::fragment(update).standalone()",
+    "RemovedExecDefinitions",
   ],
   "codex-rs/core/src/tools/spec_plan.rs": [
     "&& mcp_namespaces.contains(namespace.name.as_str())",
@@ -768,7 +775,7 @@ const REQUIRED_FILE_CONTAINS = {
     "supports_standalone_web_search",
     "web_search_mode",
     "WebSearchMode::Disabled",
-    "create_model_provider",
+    "auth.model_provider(config.provider.clone())",
     "WebSearchTool",
   ],
   "codex-rs/ext/web-search/src/tool.rs": [
@@ -822,6 +829,12 @@ const REQUIRED_FILE_CONTAINS = {
     "None => None,",
     "daybreak_override",
     "ClientRequest::TurnStart",
+    "if cli.trust && cli.ignore_user_config",
+    "if trust {",
+    "Some(TrustLevel::Untrusted) => anyhow::bail!",
+    "set_project_trust_level(project.trust_key, TrustLevel::Trusted)",
+    "default_cwd: Some(config.cwd.clone())",
+    "warning: Untrusted project-local configuration is disabled",
   ],
   "codex-rs/protocol/src/protocol.rs": [
     "pub enum ThreadSource",
@@ -928,6 +941,10 @@ const REQUIRED_FILE_CONTAINS = {
     "config.service_tier.clone_from(&settings.service_tier)",
     "config.model_reasoning_summary = settings.reasoning_summary",
     "existing_thread.resume_config_snapshot().await",
+    "fn merge_persisted_resume_metadata",
+    "if typesafe_overrides.model_provider.is_none()",
+    "overrides.contains_key(\"model_provider\")",
+    "typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone())",
   ],
   "codex-rs/app-server/src/request_processors/turn_processor.rs": [
     "TurnRequestProcessor",
@@ -969,18 +986,12 @@ const REQUIRED_FILE_CONTAINS = {
     "Command::new(&program)",
   ],
   "codex-rs/tui/src/security_setup.rs": [
-    "Optional account-security reminders for the local, ChatGPT-authenticated CLI.",
     "config.model_provider_id != \"openai\" || server.uses_remote_workspace()",
-    "ClientRequest::GetAuthStatus",
-    "GetAuthStatusParams",
-    "!matches!(auth, CodexAuth::Chatgpt(_)) || auth.is_fedramp_account()",
-    "status.auth_method != Some(AuthMode::Chatgpt)",
-    "status.auth_token.as_deref() != Some(saved_token.as_str())",
-    "RouteAwareClientPool::new_without_redirects",
-    "{}/wham/security-setup",
-    "config.chatgpt_base_url.trim_end_matches('/')",
-    "auth_provider_from_auth(&auth)\n                        .to_auth_headers()\n                        .ok()?",
+    "ClientRequest::GetAccountSecuritySetup",
+    "GetAccountSecuritySetupResponse",
+    "Identity::from_auth(&current).as_ref() != Some(&identity)",
     "url.host_str() == Some(\"chatgpt.com\")",
+    "url.scheme() == \"https\"",
     "Duration::from_secs(3)",
   ],
   "codex-rs/models-manager/src/manager.rs": [
@@ -1103,7 +1114,12 @@ const REQUIRED_FILE_CONTAINS = {
       "Ok(ResponseEvent::OutputItemDone(item)) => output.push(item)",
       "for item in std::mem::take(&mut output)",
       "sess.record_annotated_conversation_items",
-      "sess.record_observed_response_completed"
+      "sess.record_observed_response_completed",
+    "let Some(delay) = e.retry_delay(retries) else",
+    "let retry_after = e.retry_after()",
+    "map(RetryAfter::deadline)",
+    "tokio::time::sleep_until(retry_at).await",
+    "Err(e) => return Err(e)",
   ],
   "codex-rs/core/src/session/async_compaction.rs": [
       "let mut result = state.async_compaction.result.take()?",
@@ -1161,7 +1177,17 @@ const REQUIRED_FILE_CONTAINS = {
   "codex-rs/protocol/src/error.rs": [
     "| CodexErrorDetails::ModelNotFound { .. }",
     "CodexErrorDetails::ModelNotFound { .. } => CodexErrorInfo::ModelNotFound",
-    "CodexErrorDetails::ModelNotFound { status, .. } => *status"
+    "CodexErrorDetails::ModelNotFound { status, .. }\n            | CodexErrorDetails::ContentPolicyViolation { status, .. } => *status",
+    "pub fn is_runtime_auth_denial",
+    "StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN",
+    "\"runtime_assertion_invalid\"",
+    "\"runtime_instance_paused\"",
+    "\"runtime_instance_revoked\"",
+    "\"invalid_agent_instance_assertion\"",
+    "| CodexErrorDetails::WorkspaceAccessDenied(_)",
+    "| CodexErrorDetails::AccessProgramNotEnabled(_)",
+    "| CodexErrorDetails::InferenceHookDenied { .. }",
+    "| CodexErrorDetails::ContentPolicyViolation { .. }",
   ],
   "codex-rs/rmcp-client/src/request_cancellation.rs": [
     "struct CancelOnDrop",
@@ -1199,6 +1225,53 @@ const REQUIRED_FILE_CONTAINS = {
     "(\"Removed deferred tool namespaces\", &removed)",
     "\"developer\",\n                        (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG)",
     "ContentItemKind(\"tools.deferred_namespaces\".to_string())",
+  ],
+  "codex-rs/model-provider/src/auth_tests.rs": [
+    "custom_provider_does_not_inherit_ambient_auth_headers",
+    "custom_provider_uses_explicit_bearer_instead_of_ambient_auth",
+    "openai_provider_preserves_ambient_auth_headers",
+  ],
+  "codex-rs/app-server/src/request_processors/account_processor/security_setup.rs": [
+    "get_account_security_setup",
+    "!matches!(saved, CodexAuth::Chatgpt(_)) || saved.is_fedramp_account()",
+    "saved.get_token().ok()? != auth.get_token().ok()?",
+    "auth_provider_for_request",
+    "resolved.bind_http_client_factory(factory)",
+    "RouteAwareClientPool::new_without_redirects",
+    "resolved.validate_headers(&headers)",
+    "{}/wham/security-setup",
+    "config.chatgpt_base_url.trim_end_matches('/')",
+    "!= source_generation",
+    "current.get_account_id().as_ref() != Some(&account_id)",
+    "current.get_chatgpt_user_id().as_ref() != Some(&user_id)",
+  ],
+  "codex-rs/model-provider/src/provider_tests.rs": [
+    "RemoteCompactionSupport",
+    "remote_compaction",
+    "RemoteCompactionSupport::V2",
+    "amazon_bedrock_provider_creates_static_models_manager",
+    "openai.gpt-5.5",
+    "openai.gpt-5.6-sol",
+    "openai.gpt-5.6-terra",
+    "openai.gpt-5.6-luna",
+    "openai.gpt-6.1-sol",
+    "openai.gpt-6-sol",
+    "openai.gpt-6-luna",
+  ],
+  "codex-rs/model-provider/src/request_setup.rs": [
+    "pub struct ResolvedProviderRequest",
+    "pub auth_owner: Option<AuthOwner>",
+    "pub async fn resolve_request",
+    "resolved_auth.validate_headers(&api_provider.headers)?",
+    "bind_http_client_factory(http_client_factory)",
+    "ClientRedirectPolicy::Reject"
+  ],
+  "codex-rs/tui/src/chatwidget/mcp_startup.rs": [
+    "fn update_mcp_startup_status",
+    "self.mcp_startup_status.is_none() && !matches!(status, McpStartupStatus::Starting)",
+    "let current = self.mcp_startup_status.as_ref()?",
+    "let first = starting.first()?",
+    "self.finish_mcp_startup();"
   ],
 };
 
@@ -1570,16 +1643,16 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
-    id: "compact.image-budget-owned-by-codex",
-    kind: "feature_gate",
-    file: "codex-rs/core/src/compact_remote_v2.rs",
-    file_contains_all: [
+    "id": "compact.image-budget-owned-by-codex",
+    "kind": "feature_gate",
+    "file": "codex-rs/core/src/compact_remote_v2.rs",
+    "file_contains_all": [
       "image_budget: RetainedImageBudget",
       "RetainedImageBudget::Enabled",
       "truncate_retained_messages",
-      "images::truncate_message_to_token_budget",
-      "remaining = 0",
-    ],
+      "media::truncate_message_to_token_budget",
+      "remaining = 0"
+    ]
   },
   {
     id: "models.cache-provider-auth-identity",
@@ -1713,10 +1786,10 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
-    id: "model-provider.bedrock-static-manager-models",
-    kind: "provider_catalog",
-    file: "codex-rs/model-provider/src/provider.rs",
-    file_contains_all: [
+    "id": "model-provider.bedrock-static-manager-models",
+    "kind": "provider_catalog",
+    "file": "codex-rs/model-provider/src/provider_tests.rs",
+    "file_contains_all": [
       "amazon_bedrock_provider_creates_static_models_manager",
       "openai.gpt-5.5",
       "openai.gpt-5.6-sol",
@@ -1724,8 +1797,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "openai.gpt-5.6-luna",
       "openai.gpt-6.1-sol",
       "openai.gpt-6-sol",
-      "openai.gpt-6-luna",
-    ],
+      "openai.gpt-6-luna"
+    ]
   },
   {
     id: "sse.responses-events",
@@ -1767,17 +1840,17 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
-    id: "web-search.custom-provider-capability",
-    kind: "capability_gate",
-    file: "codex-rs/ext/web-search/src/extension.rs",
-    file_contains_all: [
+    "id": "web-search.custom-provider-capability",
+    "kind": "capability_gate",
+    "file": "codex-rs/ext/web-search/src/extension.rs",
+    "file_contains_all": [
       "WebSearchExtensionConfig",
       "supports_standalone_web_search",
       "web_search_mode",
       "WebSearchMode::Disabled",
-      "create_model_provider",
-      "WebSearchTool",
-    ],
+      "auth.model_provider(config.provider.clone())",
+      "WebSearchTool"
+    ]
   },
   {
     id: "web-search.standalone-route",
@@ -2147,22 +2220,18 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
-    id: "tui.security-setup-auth-boundary",
-    kind: "authenticated_auxiliary_request",
-    file: "codex-rs/tui/src/security_setup.rs",
-    file_contains_all: [
+    "id": "tui.security-setup-auth-boundary",
+    "kind": "authenticated_auxiliary_request",
+    "file": "codex-rs/tui/src/security_setup.rs",
+    "file_contains_all": [
       "config.model_provider_id != \"openai\" || server.uses_remote_workspace()",
-      "ClientRequest::GetAuthStatus",
-      "!matches!(auth, CodexAuth::Chatgpt(_)) || auth.is_fedramp_account()",
-      "status.auth_method != Some(AuthMode::Chatgpt)",
-      "status.auth_token.as_deref() != Some(saved_token.as_str())",
-      "RouteAwareClientPool::new_without_redirects",
-      "{}/wham/security-setup",
-      "config.chatgpt_base_url.trim_end_matches('/')",
-      "auth_provider_from_auth(&auth)\n                        .to_auth_headers()\n                        .ok()?",
+      "ClientRequest::GetAccountSecuritySetup",
+      "GetAccountSecuritySetupResponse",
+      "Identity::from_auth(&current).as_ref() != Some(&identity)",
       "url.host_str() == Some(\"chatgpt.com\")",
-      "Duration::from_secs(3)",
-    ],
+      "url.scheme() == \"https\"",
+      "Duration::from_secs(3)"
+    ]
   },
   {
     id: "models.explicit-provider-catalog-authoritative",
@@ -2539,7 +2608,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     "file_contains_all": [
       "CodexErrorDetails::ResponseIncomplete(incomplete)",
       "CompactionRequestKind::Background(_)",
-      "sess.record_rollout_budget_usage(usage).await",
+      "record_rollout_budget_usage(&turn_context.sub_id, usage)",
       "sess.record_incomplete_response_usage(",
       "match event?"
     ]
@@ -2779,7 +2848,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     "file_contains_all": [
       "| CodexErrorDetails::ModelNotFound { .. }",
       "CodexErrorDetails::ModelNotFound { .. } => CodexErrorInfo::ModelNotFound",
-      "CodexErrorDetails::ModelNotFound { status, .. } => *status"
+      "CodexErrorDetails::ModelNotFound { status, .. }\n            | CodexErrorDetails::ContentPolicyViolation { status, .. } => *status"
     ]
   },
   {
@@ -2969,6 +3038,141 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "(\"Removed deferred tool namespaces\", &removed)",
       "\"developer\",\n                        (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG)",
       "ContentItemKind(\"tools.deferred_namespaces\".to_string())"
+    ]
+  },
+  {
+    "id": "app-server.security-setup-runtime-auth",
+    "kind": "authenticated_auxiliary_request",
+    "file": "codex-rs/app-server/src/request_processors/account_processor/security_setup.rs",
+    "file_contains_all": [
+      "get_account_security_setup",
+      "!matches!(saved, CodexAuth::Chatgpt(_)) || saved.is_fedramp_account()",
+      "saved.get_token().ok()? != auth.get_token().ok()?",
+      "auth_provider_for_request",
+      "resolved.bind_http_client_factory(factory)",
+      "RouteAwareClientPool::new_without_redirects",
+      "resolved.validate_headers(&headers)",
+      "{}/wham/security-setup",
+      "config.chatgpt_base_url.trim_end_matches('/')",
+      "!= source_generation",
+      "current.get_account_id().as_ref() != Some(&account_id)",
+      "current.get_chatgpt_user_id().as_ref() != Some(&user_id)"
+    ]
+  },
+  {
+    "id": "runtime.websocket-auth-owner",
+    "kind": "request_identity",
+    "file": "codex-rs/core/src/client.rs",
+    "file_contains_all": [
+      "auth_owner: Option<AuthOwner>",
+      "if websocket_session.auth_owner != auth_owner",
+      "if runtime_id.is_some()",
+      "self.websocket_session.auth_owner != auth_owner",
+      "!owner.is_current()",
+      "self.turn_state = Arc::new(OnceLock::new());",
+      "prompt_cache_options_changed"
+    ]
+  },
+  {
+    "id": "runtime.resolved-request-auth",
+    "kind": "request_identity",
+    "file": "codex-rs/model-provider/src/request_setup.rs",
+    "file_contains_all": [
+      "pub struct ResolvedProviderRequest",
+      "pub auth_owner: Option<AuthOwner>",
+      "pub async fn resolve_request",
+      "resolved_auth.validate_headers(&api_provider.headers)?",
+      "bind_http_client_factory(http_client_factory)",
+      "ClientRedirectPolicy::Reject"
+    ]
+  },
+  {
+    "id": "responses.terminal-runtime-denials",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/protocol/src/error.rs",
+    "file_contains_all": [
+      "pub fn is_runtime_auth_denial",
+      "StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN",
+      "\"runtime_assertion_invalid\"",
+      "\"runtime_instance_paused\"",
+      "\"runtime_instance_revoked\"",
+      "\"invalid_agent_instance_assertion\"",
+      "| CodexErrorDetails::WorkspaceAccessDenied(_)",
+      "| CodexErrorDetails::AccessProgramNotEnabled(_)",
+      "| CodexErrorDetails::InferenceHookDenied { .. }",
+      "| CodexErrorDetails::ContentPolicyViolation { .. }"
+    ]
+  },
+  {
+    "id": "websocket.large-message-fragmentation",
+    "kind": "transport",
+    "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    "file_contains_all": [
+      "const FRAGMENT_SIZE: usize = 1024 * 1024",
+      "Frame::message_fragment(payload, opcode, fragment)",
+      "opcode = Data::Continue",
+      "large_turn_is_one_text_message_in_bounded_frames"
+    ]
+  },
+  {
+    "id": "exec.explicit-project-trust",
+    "kind": "security_boundary",
+    "file": "codex-rs/exec/src/lib.rs",
+    "file_contains_all": [
+      "if cli.trust && cli.ignore_user_config",
+      "if trust {",
+      "Some(TrustLevel::Untrusted) => anyhow::bail!",
+      "set_project_trust_level(project.trust_key, TrustLevel::Trusted)",
+      "default_cwd: Some(config.cwd.clone())",
+      "warning: Untrusted project-local configuration is disabled"
+    ]
+  },
+  {
+    "id": "resume.saved-provider-precedence",
+    "kind": "session_lifecycle",
+    "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+    "file_contains_all": [
+      "fn merge_persisted_resume_metadata",
+      "if typesafe_overrides.model_provider.is_none()",
+      "overrides.contains_key(\"model_provider\")",
+      "typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone())"
+    ]
+  },
+  {
+    "id": "mcp.authoritative-startup-rounds",
+    "kind": "session_lifecycle",
+    "file": "codex-rs/tui/src/chatwidget/mcp_startup.rs",
+    "file_contains_all": [
+      "fn update_mcp_startup_status",
+      "self.mcp_startup_status.is_none() && !matches!(status, McpStartupStatus::Starting)",
+      "let current = self.mcp_startup_status.as_ref()?",
+      "let first = starting.first()?",
+      "self.finish_mcp_startup();"
+    ]
+  },
+  {
+    "id": "context.incremental-exec-catalog",
+    "kind": "context_boundary",
+    "file": "codex-rs/core/src/context/world_state/top_level_tools.rs",
+    "file_contains_all": [
+      "pub(crate) enum TopLevelToolsSnapshot",
+      "TopLevelToolsSnapshot::ToolsOnly(self.hashes.clone())",
+      "TopLevelToolsSnapshot::WithExec {",
+      "\"tools.incremental_update\"",
+      "WorldStateUpdate::fragment(update).standalone()",
+      "RemovedExecDefinitions"
+    ]
+  },
+  {
+    "id": "compact.native-error-retry-policy",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/core/src/compact.rs",
+    "file_contains_all": [
+      "let Some(delay) = e.retry_delay(retries) else",
+      "let retry_after = e.retry_after()",
+      "map(RetryAfter::deadline)",
+      "tokio::time::sleep_until(retry_at).await",
+      "Err(e) => return Err(e)"
     ]
   },
 ];
@@ -3574,6 +3778,16 @@ function runSelfTest() {
 
   // Retained and newly qualified contracts must reject the loss of a source marker.
   for (const id of [
+    "compact.native-error-retry-policy",
+    "context.incremental-exec-catalog",
+    "mcp.authoritative-startup-rounds",
+    "resume.saved-provider-precedence",
+    "exec.explicit-project-trust",
+    "websocket.large-message-fragmentation",
+    "responses.terminal-runtime-denials",
+    "runtime.resolved-request-auth",
+    "runtime.websocket-auth-owner",
+    "app-server.security-setup-runtime-auth",
     "gcp.incremental-remote-compaction",
     "gcp.incremental-native-tool-identity",
     "gcp.incremental-default-and-opt-out",
