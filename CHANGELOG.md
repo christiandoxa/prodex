@@ -2,47 +2,63 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.169.0 - 2026-11-13
+
+### Misc
+
+- Retain cold-cache bootstrap with cache-first Playwright (`df2fa86`)
+- Keep Playwright startup independent of npm registry (`28c454d`)
+# Prodex 0.169.0
+
+Qualify Codex CLI 0.169.0 while retaining native trust, authentication, resume,
+and transport behavior in ordinary Prodex and Super launches.
+
+## New Features
+
+- Advance the tested Codex baseline from 0.167.2 to the pinned 0.169.0 source and official binary.
+- Guard credential-source-bound request setup, runtime WebSocket reauthentication,
+  prompt-cache options, and bounded multi-frame native requests.
+- Refresh the app-server lifecycle schema hashes after reviewing optional moderation
+  metadata, inference-hook errors, and file-backed audio alternatives.
+
+## Bug Fixes
+
+- Prefer cached npm metadata for default Playwright discovery, Super startup and expose aliases. This avoids redundant registry refreshes for prepared packages while retaining cold-cache bootstrap, no-install behavior and explicit user MCP configuration.
+
+- Follow extracted upstream authentication and provider-test owners without dropping
+  custom-provider credential isolation checks.
+- Preserve security-notice identity and no-redirect checks after their move from the
+  TUI to app-server, including the TUI's final account and HTTPS action validation.
+- Add regression coverage proving Smart Context retains incremental exec definitions,
+  removal notices and prompt-cache TTL settings with exact request reconstruction.
+- Verify native terminal runtime, workspace and policy errors are not reclassified
+  as quota, overload or continuation-recovery signals.
+
+## Compatibility and Upgrade
+
+Native Codex owns explicit `exec --trust`, saved-provider restoration, observed MCP
+startup rounds and compaction retry policy. Prodex does not automatically grant
+project trust or enable experimental incremental-exec features. Existing local
+API keys, explicit model/context choices, UUID resume, `/resume`, reasoning logs
+and compaction remain supported. Compatible installed RTK, Codebase Memory MCP,
+Playwright MCP and Ponytail remain automatic in Super; Presidio still asks for consent.
+
+Interactive qualification uses isolated loopback services and synthetic credentials;
+it is not a claim of live-provider coverage or equivalent capabilities across models.
+The supported Codex minimum remains capability-based. Update Codex separately to
+0.169.0 to use the newly qualified native behavior.
+
+## Changelog
+
+- Qualify Kiro CLI 3.3.0 for native release checks; retain the existing runtime minimum.
+
+Full Changelog: [0.167.8...0.169.0](https://github.com/christiandoxa/prodex/compare/0.167.8...0.169.0)
+
 ## 0.167.8 - 2026-11-12
 
 ### Docs
 
 - Clarify native Vertex launch boundary (`193e603`)
-# Prodex 0.167.8
-
-Qualify Codex CLI 0.167.2 and preserve native Vertex incremental-tool behavior.
-
-## New Features
-
-- Advance the tested Codex reference to 0.167.2 using pinned source and official binaries.
-- Guard the stable, default-on `incremental_tools_legacy_gcp` feature and its independent opt-out. Bedrock's legacy flag is now stable but remains disabled by default.
-
-## Bug Fixes
-
-- Update compatibility assertions for native GCP tool routing, namespaces, tool search, history-prefix preservation, and remote compaction.
-- Extend Smart Context exact-reconstruction coverage to incremental requests with an empty top-level tool catalog, including compaction, while retaining hosted-search coverage.
-
-## Compatibility and Upgrade
-
-Prodex preserves upstream ownership of native GCP authentication and transport
-through `prodex run` with a GCP-configured profile. This qualification does not
-add Vertex to the Super provider picker; that picker retains its existing
-supported-provider boundary.
-Regular OpenAI and custom local endpoints are not switched to GCP incremental
-features. Existing local API-key handling, reasoning, resume, and compaction
-behavior remains unchanged. Compatible installed RTK, Codebase Memory MCP,
-Playwright MCP, and Ponytail remain automatic in Super; Presidio still asks
-for consent.
-
-Issue #127 reports local pre-commit profile selection exhaustion without a
-version or diagnostic log. It is not marked fixed by this release: the screenshot
-alone does not identify a safe, reproducible runtime correction. Existing bounded
-recovery, quota classification, and continuation ownership safeguards remain in place.
-
-## Changelog
-
-- Qualify Kiro CLI 3.2.1 for the release's native-client validation without changing its minimum runtime policy.
-
-Full Changelog: [0.167.7...0.167.8](https://github.com/christiandoxa/prodex/compare/0.167.7...0.167.8)
 
 ## 0.167.7 - 2026-11-11
 
@@ -137,9 +153,3 @@ Full Changelog: [0.167.7...0.167.8](https://github.com/christiandoxa/prodex/comp
 - Prevent incident data from returning to tracked source (`ff640fc`)
 - Qualify warm tokenizer startup and stable tool integration (`d437f5e`)
 - Enforce safe automatic Smart Context on all launches (`f9a8af2`)
-
-## 0.166.2 - 2026-10-31
-
-### Misc
-
-- Preserve native root session ownership (`2c86952`)
