@@ -437,7 +437,7 @@ fn configure_default_playwright_mcp_server(table: &mut toml::Table, command: &Pa
 
 fn playwright_mcp_args() -> [String; 5] {
     [
-        "--offline".to_string(),
+        "--prefer-offline".to_string(),
         "--no-install".to_string(),
         PLAYWRIGHT_MCP_PACKAGE.to_string(),
         "--headless".to_string(),

@@ -25,19 +25,19 @@ fn compiled_optional_alias_plans_preserve_executables_prefixes_and_playwright_sp
             "optional:playwright-mcp",
             OptionalToolId::PlaywrightMcp,
             "/synthetic/native",
-            &["--offline", "--no-install", "@playwright/mcp"],
+            &["--prefer-offline", "--no-install", "@playwright/mcp"],
         ),
         (
             "optional:PLAYWRIGHT",
             OptionalToolId::PlaywrightMcp,
             "/synthetic/native",
-            &["--offline", "--no-install", "@playwright/mcp"],
+            &["--prefer-offline", "--no-install", "@playwright/mcp"],
         ),
         (
             "optional: playwright ",
             OptionalToolId::PlaywrightMcp,
             "/synthetic/native",
-            &["--offline", "--no-install", "@playwright/mcp"],
+            &["--prefer-offline", "--no-install", "@playwright/mcp"],
         ),
         (
             "optional:playwright",
