@@ -152,7 +152,7 @@ mod managed_probe_tests {
         let npx = root.join("npx");
         fs::write(
             &npx,
-            "#!/bin/sh\n: > \"$0.executed\"\nprintf 'Version 0.0.83\\n'\n",
+            "#!/bin/sh\n: > \"$0.executed\"\n[ \"$*\" = \"--offline --no-install @playwright/mcp --version\" ] || exit 42\nprintf 'Version 0.0.83\\n'\n",
         )
         .unwrap();
         fs::set_permissions(&npx, fs::Permissions::from_mode(0o700)).unwrap();

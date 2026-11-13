@@ -71,6 +71,7 @@ fn configures_playwright_default() {
             .filter_map(toml::Value::as_str)
             .collect::<Vec<_>>(),
         [
+            "--offline",
             "--no-install",
             PLAYWRIGHT_MCP_PACKAGE,
             "--headless",
@@ -297,7 +298,7 @@ enabled = true
 fn compiled_required_playwright_contract_rejects_unsafe_inherited_mcp_config() {
     let package = PLAYWRIGHT_MCP_PACKAGE;
     let baseline_args =
-        format!("[\"--no-install\", \"{package}\", \"--headless\", \"--isolated\"]");
+        format!("[\"--offline\", \"--no-install\", \"{package}\", \"--headless\", \"--isolated\"]");
     let cases = [
         (
             format!("enabled = false\ncommand = \"/bin/npx\"\nargs = {baseline_args}"),
@@ -347,7 +348,7 @@ fn required_playwright_accepts_managed_inherited_config() -> Result<()> {
     fs::write(
         home.join("config.toml"),
         format!(
-            "[mcp_servers.playwright]\ncommand = \"/bin/npx\"\nargs = [\"--no-install\", \"{}\", \"--headless\", \"--isolated\"]\nenabled = true\n",
+            "[mcp_servers.playwright]\ncommand = \"/bin/npx\"\nargs = [\"--offline\", \"--no-install\", \"{}\", \"--headless\", \"--isolated\"]\nenabled = true\n",
             PLAYWRIGHT_MCP_PACKAGE
         ),
     )?;

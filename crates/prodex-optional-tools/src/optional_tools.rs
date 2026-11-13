@@ -26,8 +26,14 @@ mod ponytail;
 
 const MAX_EXECUTABLE_DIGEST_BYTES: u64 = 512 * 1024 * 1024;
 const TOOL_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-const PLAYWRIGHT_MCP_PROBE_ARGS: [&str; 3] =
-    ["--no-install", crate::PLAYWRIGHT_MCP_PACKAGE, "--version"];
+// --no-install alone may still refresh registry metadata and stall an otherwise
+// usable cached package. Runtime discovery must not depend on registry access.
+const PLAYWRIGHT_MCP_PROBE_ARGS: [&str; 4] = [
+    "--offline",
+    "--no-install",
+    crate::PLAYWRIGHT_MCP_PACKAGE,
+    "--version",
+];
 
 pub(crate) fn validate_manifest_policy(
     result: std::result::Result<Option<String>, prodex_mojo_core::MojoError>,

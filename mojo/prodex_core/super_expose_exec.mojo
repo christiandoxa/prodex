@@ -239,7 +239,7 @@ def super_expose_write_optional_alias_plan(
         js_literal(sink, StringSlice(' has no executable path"},"prefix":[]}'))
         return
     if kind == OPTIONAL_TOOL_PLAYWRIGHT and not rich_view_matches_literal["playwright"](alias, False):
-        js_literal(sink, StringSlice('{"tool":"playwright-mcp","program":{"kind":"tool_path","missing_path_message":"validated Playwright MCP has no npx executable path"},"prefix":["--no-install","@playwright/mcp"]}'))
+        js_literal(sink, StringSlice('{"tool":"playwright-mcp","program":{"kind":"tool_path","missing_path_message":"validated Playwright MCP has no npx executable path"},"prefix":["--offline","--no-install","@playwright/mcp"]}'))
         return
     if kind == OPTIONAL_TOOL_PRESIDIO:
         js_literal(sink, StringSlice('{"tool":"presidio","program":{"kind":"prodex"},"prefix":["super","--no-sub-agent","--presidio"]}'))

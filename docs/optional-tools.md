@@ -102,7 +102,7 @@ Kiro launches retain that shared server but add `check_index_coverage` to the
 server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
 Schema composition; all other Codebase Memory tools remain available.
 Both ordinary launch and required-tool checks verify the Node runtime before
-probing the installed Playwright package. Playwright MCP requires validated Node.js 18+, `npx`, and Playwright MCP `0.0.79` or newer. Prodex invokes `npx --no-install @playwright/mcp`, probes the installed package version, and rejects an installed version below the minimum. `0.0.85` is the current latest-stable release-qualified reference.
+probing the installed Playwright package. Playwright MCP requires validated Node.js 18+, `npx`, and Playwright MCP `0.0.79` or newer. Prodex invokes `npx --offline --no-install @playwright/mcp`, uses only the installed/cached package without refreshing the npm registry, probes its version, and rejects an installed version below the minimum. `0.0.85` is the current latest-stable release-qualified reference.
 Presidio remains a consent-controlled service selection and uses the existing
 launch/expose health checks. Prodex accepts official Presidio analyzer/anonymizer images at `2.2.364` or newer; the release-qualified defaults remain digest-pinned, while newer official images can be supplied with `PRODEX_PRESIDIO_ANALYZER_IMAGE` and `PRODEX_PRESIDIO_ANONYMIZER_IMAGE`. `--require-tool presidio` additionally requires healthy services
 and `fail_mode = "closed"`, so an inspection failure cannot silently bypass
