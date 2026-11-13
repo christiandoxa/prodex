@@ -181,3 +181,44 @@ fn invalid_utf8_bodies_do_not_trigger_lossy_retry_classification() {
     );
 }
 
+#[test]
+fn native_codex_01690_terminal_denials_are_not_rotation_signals() {
+    for code in [
+        "runtime_assertion_invalid",
+        "runtime_instance_paused",
+        "runtime_instance_revoked",
+        "invalid_agent_instance_assertion",
+        "workspace_access_denied",
+        "invalid_workspace",
+        "access_program_not_enabled",
+        "content_policy_violation",
+        "inference_hook_denied",
+        "budget_reached",
+    ] {
+        let payload = serde_json::json!({
+            "type": "response.failed",
+            "response": {"id": "resp-terminal-fixture", "status": "failed",
+                "error": {"code": code, "message": "Request denied by upstream policy."}}
+        });
+        let lines = vec![payload.to_string()];
+        assert_eq!(parse_runtime_sse_payload(&lines), Some(payload));
+        let event = parse_runtime_sse_event(&lines);
+        assert_eq!(event.event_type.as_deref(), Some("response.failed"));
+        assert!(
+            !event.quota_blocked && !event.rate_limited && !event.overloaded,
+            "{code}"
+        );
+        assert!(
+            !event.previous_response_not_found && !event.invalid_previous_response_id,
+            "{code}"
+        );
+        let wire = format!("data: {}\n\n", lines[0]);
+        assert!(
+            matches!(
+                inspect_runtime_sse_buffer(wire.as_bytes()),
+                RuntimeSseInspectionProgress::Commit { .. }
+            ),
+            "{code}"
+        );
+    }
+}
