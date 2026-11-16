@@ -589,6 +589,34 @@ fn prepare_overlay_launch(
     })
 }
 
+// Overlays are disposable configuration, not a new persistence namespace. This
+// applies to external profiles and profileless local launches as well as managed
+// profiles. Otherwise an initial goal/index database dies with its overlay.
+fn preserve_overlay_sqlite_home(
+    child: &mut prodex_runtime_launch::ChildProcessPlan,
+    prepared: &PreparedRuntimeLaunch,
+    inherited: Option<std::ffi::OsString>,
+) {
+    if child
+        .extra_env
+        .iter()
+        .any(|(key, _)| key == "CODEX_SQLITE_HOME")
+    {
+        return;
+    }
+    let persistent_home = if prepared.managed {
+        &prepared.paths.shared_codex_root
+    } else {
+        &prepared.codex_home
+    };
+    let home = inherited
+        .filter(|value| !value.to_string_lossy().trim().is_empty())
+        .unwrap_or_else(|| persistent_home.as_os_str().to_os_string());
+    // Native sqlite_home configuration/managed requirements still have higher
+    // precedence than this environment default, so explicit user choices survive.
+    child.extra_env.push(("CODEX_SQLITE_HOME".into(), home));
+}
+
 fn prepare_child_plan(
     strategy: &mut RuntimeToolLaunchStrategy,
     prepared: &PreparedRuntimeLaunch,
@@ -598,17 +626,7 @@ fn prepare_child_plan(
 ) -> Result<prodex_runtime_launch::ChildProcessPlan> {
     let mut child = strategy.build_child_plan(overlay_home, runtime_args)?;
     strategy.finalize_child_plan(&mut child, overlay_home, runtime_proxy);
-    if prepared.managed
-        && !child
-            .extra_env
-            .iter()
-            .any(|(key, _)| key == "CODEX_SQLITE_HOME")
-    {
-        child.extra_env.push((
-            "CODEX_SQLITE_HOME".into(),
-            prepared.paths.shared_codex_root.as_os_str().to_os_string(),
-        ));
-    }
+    preserve_overlay_sqlite_home(&mut child, prepared, std::env::var_os("CODEX_SQLITE_HOME"));
     if !strategy.args.dry_run
         && !prodex_cli::is_codex_command_server_subcommand(&strategy.codex_args)
     {
@@ -648,17 +666,11 @@ fn attach_session_app_server_companion(
     };
     connect_child_to_private_companion(&mut plan.child, &socket);
     strategy.finalize_child_plan(&mut companion, overlay_home, runtime_proxy);
-    if prepared.managed
-        && !companion
-            .extra_env
-            .iter()
-            .any(|(key, _)| key == "CODEX_SQLITE_HOME")
-    {
-        companion.extra_env.push((
-            "CODEX_SQLITE_HOME".into(),
-            prepared.paths.shared_codex_root.as_os_str().to_os_string(),
-        ));
-    }
+    preserve_overlay_sqlite_home(
+        &mut companion,
+        prepared,
+        std::env::var_os("CODEX_SQLITE_HOME"),
+    );
     if let Ok(workspace) = std::env::current_dir() {
         let sqlite_home = companion
             .extra_env

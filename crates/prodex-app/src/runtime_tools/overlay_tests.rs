@@ -292,3 +292,62 @@ fn explicit_local_super_configuration_keeps_cli_precedence_in_owned_server() {
     assert!(crate::codex_cli_config_override_value(&server, "model_catalog_json").is_some());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn disposable_overlay_preserves_native_goal_and_index_database_home() {
+    let root = temp_overlay("persistent-sqlite");
+    let shared = root.join("shared");
+    let external = root.join("external");
+    for managed in [false, true] {
+        let prepared = PreparedRuntimeLaunch {
+            paths: AppPaths {
+                root: root.clone(),
+                state_file: root.join("state.json"),
+                managed_profiles_root: root.join("profiles"),
+                shared_codex_root: shared.clone(),
+                legacy_shared_codex_root: root.join("legacy"),
+            },
+            codex_home: external.clone(),
+            managed,
+            runtime_proxy: None,
+        };
+        let expected = if managed { &shared } else { &external };
+        std::fs::create_dir_all(expected).unwrap();
+        let mut child = prodex_runtime_launch::ChildProcessPlan::new(
+            "codex".into(),
+            root.join("temporary-overlay"),
+        );
+        preserve_overlay_sqlite_home(&mut child, &prepared, None);
+        assert_eq!(
+            child.extra_env,
+            vec![(
+                OsString::from("CODEX_SQLITE_HOME"),
+                expected.as_os_str().to_owned()
+            )]
+        );
+        let db = rusqlite::Connection::open(expected.join("goals_1.sqlite")).unwrap();
+        db.execute_batch("CREATE TABLE IF NOT EXISTS fixture_goals (objective TEXT); INSERT INTO fixture_goals VALUES ('preserve paused goal');").unwrap();
+        drop(db);
+        let mut next =
+            prodex_runtime_launch::ChildProcessPlan::new("codex".into(), root.join("next-overlay"));
+        preserve_overlay_sqlite_home(&mut next, &prepared, Some(" ".into()));
+        assert_eq!(next.extra_env, child.extra_env);
+        let db =
+            rusqlite::Connection::open(PathBuf::from(&next.extra_env[0].1).join("goals_1.sqlite"))
+                .unwrap();
+        assert_eq!(
+            db.query_row("SELECT objective FROM fixture_goals LIMIT 1", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            "preserve paused goal"
+        );
+        drop(db);
+        next.extra_env.clear();
+        preserve_overlay_sqlite_home(&mut next, &prepared, Some("explicit-sqlite-home".into()));
+        assert_eq!(next.extra_env[0].1, OsString::from("explicit-sqlite-home"));
+        preserve_overlay_sqlite_home(&mut next, &prepared, Some("must-not-overwrite".into()));
+        assert_eq!(next.extra_env.len(), 1);
+        assert_eq!(next.extra_env[0].1, OsString::from("explicit-sqlite-home"));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
