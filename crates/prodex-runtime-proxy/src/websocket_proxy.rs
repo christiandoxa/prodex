@@ -116,7 +116,12 @@ pub fn runtime_websocket_proxy_authorization_header(
     if username.is_empty() {
         return None;
     }
-    let credentials = format!("{}:{}", username, password.unwrap_or_default());
+    // URL userinfo is percent-encoded; the proxy authenticates the decoded bytes.
+    let mut credentials = percent_encoding::percent_decode_str(username).collect::<Vec<_>>();
+    credentials.push(b':');
+    credentials.extend(percent_encoding::percent_decode_str(
+        password.unwrap_or_default(),
+    ));
     Some(format!(
         "Basic {}",
         base64::engine::general_purpose::STANDARD.encode(credentials)

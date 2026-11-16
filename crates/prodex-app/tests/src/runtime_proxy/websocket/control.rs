@@ -97,9 +97,16 @@ fn controlled_local_pair() -> (
     let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
     let address = server.server_addr().to_ip().unwrap();
     let client = thread::spawn(move || {
-        tungstenite::connect(format!("ws://{address}/responses"))
-            .unwrap()
-            .0
+        tungstenite::client_tls_with_config(
+            format!("ws://{address}/responses"),
+            crate::proxy_config::stream::ProxyStream::from(
+                std::net::TcpStream::connect(address).unwrap(),
+            ),
+            None,
+            None,
+        )
+        .unwrap()
+        .0
     });
     let request = server
         .recv_timeout(Duration::from_secs(5))

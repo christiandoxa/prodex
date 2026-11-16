@@ -130,7 +130,7 @@ pub(super) fn runtime_test_local_websocket_pair()
         .expect("test websocket listener should expose an address");
     let client = thread::spawn(move || {
         let (socket, _response) =
-            ws_connect(format!("ws://{addr}")).expect("test websocket client should connect");
+            tungstenite::client_tls_with_config(format!("ws://{addr}"), crate::proxy_config::stream::ProxyStream::from(std::net::TcpStream::connect(addr).unwrap()), None, None).expect("test websocket client should connect");
         socket
     });
     let (server_stream, _addr) = listener

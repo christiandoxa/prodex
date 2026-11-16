@@ -808,3 +808,22 @@ profile_inflight_hard_limit = 11
     let result = std::panic::catch_unwind(runtime_proxy_profile_inflight_hard_limit);
     assert!(result.is_err(), "zero hard limit should fail closed");
 }
+
+#[test]
+fn secure_websocket_proxy_fallback_matches_native_codex_precedence() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    for (https, http, all, expected_wss, expected_https) in [
+        (Some("http://secure.example:1"), Some("http://plain.example:2"), Some("http://all.example:3"), "secure.example", Some("secure.example")),
+        (None, Some("http://plain.example:2"), Some("http://all.example:3"), "plain.example", Some("all.example")),
+        (None, Some("http://plain.example:2"), None, "plain.example", None),
+        (None, None, Some("http://all.example:3"), "all.example", Some("all.example")),
+    ] {
+        let environment = RuntimeConfigEnvironment::read_with(|key| {
+            match key { "HTTPS_PROXY" => https, "HTTP_PROXY" => http, "ALL_PROXY" => all, _ => None }.map(OsString::from)
+        });
+        let config = RuntimeConfig::from_environment(&paths, environment).unwrap();
+        assert_eq!(config.websocket_environment.proxy_url("wss").as_ref().and_then(reqwest::Url::host_str), Some(expected_wss));
+        assert_eq!(config.websocket_environment.proxy_url("https").as_ref().and_then(reqwest::Url::host_str), expected_https);
+    }
+}

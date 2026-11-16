@@ -28,6 +28,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) log_format: RuntimeLogFormat,
     pub(crate) response_chain_trace: bool,
     pub(crate) websocket_environment: RuntimeWebsocketEnvironment,
+    pub(crate) upstream_tls: crate::proxy_config::UpstreamTlsConfig,
     pub(crate) governance: prodex_config::GovernanceConfig,
     pub(crate) tenant_detector_patterns:
         crate::runtime_proxy::presidio::local::RuntimeTenantDetectorPatterns,
@@ -73,13 +74,16 @@ impl RuntimeConfig {
 #[derive(Clone)]
 pub(crate) struct RuntimeWebsocketEnvironment {
     pub(super) https_proxy: Option<reqwest::Url>,
+    pub(super) secure_websocket_proxy: Option<reqwest::Url>,
     pub(super) http_proxy: Option<reqwest::Url>,
     pub(super) no_proxy: Vec<String>,
 }
 
 impl RuntimeWebsocketEnvironment {
     pub(crate) fn proxy_url(&self, scheme: &str) -> Option<reqwest::Url> {
-        if matches!(scheme, "wss" | "https") {
+        if scheme == "wss" {
+            self.secure_websocket_proxy.clone()
+        } else if scheme == "https" {
             self.https_proxy.clone()
         } else {
             self.http_proxy.clone()
@@ -93,7 +97,9 @@ impl RuntimeWebsocketEnvironment {
     }
 
     fn has_proxy(&self) -> bool {
-        self.https_proxy.is_some() || self.http_proxy.is_some()
+        self.https_proxy.is_some()
+            || self.secure_websocket_proxy.is_some()
+            || self.http_proxy.is_some()
     }
 }
 

@@ -40,6 +40,7 @@ mojo-core = [
 ]
 
 [dependencies]
+percent-encoding = { workspace = true }
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
 base64 = { workspace = true }
@@ -75,6 +76,8 @@ prodex_runtime_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }
 redaction = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "form", "json", "rustls", "system-proxy", "socks"] }
+rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
 rpassword = { workspace = true }
 rusqlite = { workspace = true }
 prodex_runtime_doctor = { workspace = true }

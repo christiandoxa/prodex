@@ -436,6 +436,17 @@ impl runtime_config::RuntimeConfig {
             "PROXY",
             "proxy",
         ]);
+        // Native secure WebSockets fall back to HTTP_PROXY before ALL_PROXY.
+        let secure_websocket_proxy = parser.compatibility_proxy(&[
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "PROXY",
+            "proxy",
+        ]);
         let http_proxy = parser.compatibility_proxy(&[
             "HTTP_PROXY",
             "http_proxy",
@@ -449,6 +460,25 @@ impl runtime_config::RuntimeConfig {
             .filter_map(|key| parser.environment.get(key))
             .map(|value| value.to_string_lossy().into_owned())
             .collect();
+        let proxy_tls = [&https_proxy, &http_proxy, &secure_websocket_proxy]
+            .into_iter()
+            .flatten()
+            .any(|proxy| proxy.scheme() == "https");
+        let upstream_tls = match crate::proxy_config::UpstreamTlsConfig::from_values(
+            parser.environment.get("CODEX_CA_CERTIFICATE").cloned(),
+            parser.environment.get("SSL_CERT_FILE").cloned(),
+            proxy_tls,
+        ) {
+            Ok(tls) => tls,
+            Err(error) => {
+                // This placeholder is never published: from_environment rejects all errors.
+                parser.errors.push(runtime_config::ConfigError {
+                    key: "runtime.upstream_tls",
+                    message: error.to_string(),
+                });
+                crate::proxy_config::UpstreamTlsConfig::default()
+            }
+        };
         let gemini = gemini::parse_gemini(parser);
         Self {
             tuning,
@@ -548,9 +578,11 @@ impl runtime_config::RuntimeConfig {
             response_chain_trace: parser.strict_bool("PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE", false),
             websocket_environment: runtime_config::RuntimeWebsocketEnvironment {
                 https_proxy,
+                secure_websocket_proxy,
                 http_proxy,
                 no_proxy,
             },
+            upstream_tls,
             governance: prodex_config::GovernanceConfig::personal_compatible(),
             tenant_detector_patterns:
                 crate::runtime_proxy::presidio::local::RuntimeTenantDetectorPatterns,

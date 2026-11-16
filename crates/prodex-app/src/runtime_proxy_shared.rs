@@ -262,7 +262,7 @@ pub(super) enum RuntimeWebsocketConnectResult {
 
 #[derive(Debug)]
 pub(super) struct RuntimeWebsocketTcpConnectSuccess {
-    pub(super) stream: TcpStream,
+    pub(super) stream: crate::proxy_config::stream::ProxyStream,
     pub(super) selected_addr: SocketAddr,
     pub(super) resolved_addrs: usize,
     pub(super) attempted_addrs: usize,

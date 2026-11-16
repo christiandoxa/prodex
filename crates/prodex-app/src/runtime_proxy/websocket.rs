@@ -524,7 +524,12 @@ pub(super) fn connect_runtime_proxy_upstream_websocket_with_timeout(
     let selected_addr = stream.selected_addr;
     let resolved_addrs = stream.resolved_addrs;
     let attempted_addrs = stream.attempted_addrs;
-    match client_tls_with_config(request, stream.stream, None, None) {
+    match client_tls_with_config(
+        request,
+        stream.stream,
+        None,
+        shared.runtime_config.upstream_tls.websocket_connector(),
+    ) {
         Ok((socket, response)) => Ok((
             socket,
             response,

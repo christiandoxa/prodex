@@ -128,6 +128,7 @@ prodex_shared_types = { package = "prodex-shared-types", path = "crates/prodex-s
 prodex_state = { package = "prodex-state", path = "crates/prodex-state", version = "0.169.0" }
 prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex-update-notice", version = "0.169.0" }
 redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.169.0" }
+percent-encoding = "2.3.2"
 reqwest = { version = "0.13.5", default-features = false }
 rpassword = "7.5.4"
 crossterm = "0.29.0"

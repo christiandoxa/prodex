@@ -99,12 +99,61 @@ pub(crate) fn connect_runtime_proxy_upstream_tcp_stream_via_http_proxy(
         happy_eyeballs_delay,
     )?;
 
-    match runtime_websocket_establish_http_proxy_tunnel(
-        &mut connected.stream,
-        proxy,
-        target,
-        io_timeout,
-    ) {
+    if proxy.url.scheme() == "https" {
+        let config = shared
+            .runtime_config
+            .upstream_tls
+            .proxy_client_config()
+            .map_err(|_| {
+                WsError::Io(io::Error::other(
+                    "HTTPS proxy TLS configuration is unavailable",
+                ))
+            })?;
+        connected.stream = connected
+            .stream
+            .encrypt_proxy(&proxy.host, config, io_timeout)
+            .map_err(WsError::Io)?;
+    }
+    let tunnel = if matches!(proxy.url.scheme(), "socks5" | "socks5h") {
+        use crate::proxy_config::{
+            socks::{self, SocksTarget},
+            stream::{ProxyHandshake, deadline},
+        };
+        let address = if let Ok(address) = target.host.parse() {
+            SocksTarget::Address(address)
+        } else if proxy.url.scheme() == "socks5h" {
+            SocksTarget::Domain(&target.host)
+        } else {
+            let addresses = runtime_resolve_websocket_tcp_addrs(
+                request_id,
+                shared,
+                &target.host,
+                target.port,
+                connect_timeout,
+            )
+            .map_err(WsError::Io)?;
+            let address = addresses.first().ok_or_else(|| {
+                WsError::Io(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "SOCKS5 target DNS returned no addresses",
+                ))
+            })?;
+            SocksTarget::Address(address.ip())
+        };
+        let mut handshake = ProxyHandshake {
+            stream: &mut connected.stream,
+            deadline: deadline(io_timeout).map_err(WsError::Io)?,
+        };
+        socks::negotiate(&mut handshake, &proxy.url, address, target.port).map(|()| 200)
+    } else {
+        runtime_websocket_establish_http_proxy_tunnel(
+            &mut connected.stream,
+            proxy,
+            target,
+            io_timeout,
+        )
+    };
+    match tunnel {
         Ok(status) => {
             runtime_proxy_log(
                 shared,
@@ -191,7 +240,7 @@ pub(crate) fn connect_runtime_proxy_tcp_stream_to_host(
             Ok(stream) => {
                 runtime_configure_upstream_tcp_stream(&stream, io_timeout).map_err(WsError::Io)?;
                 return Ok(RuntimeWebsocketTcpConnectSuccess {
-                    stream,
+                    stream: stream.into(),
                     selected_addr: result.addr,
                     resolved_addrs,
                     attempted_addrs,
@@ -324,11 +373,11 @@ pub(crate) fn runtime_websocket_http_proxy_for_uri(
     else {
         return Ok(None);
     };
-    if proxy_url.scheme() != "http" {
+    if !matches!(proxy_url.scheme(), "http" | "https" | "socks5" | "socks5h") {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             format!(
-                "runtime websocket proxy scheme '{}' is unsupported; use an http:// proxy or --no-proxy",
+                "runtime websocket proxy scheme '{}' is unsupported; configure an HTTP, HTTPS, SOCKS5 or SOCKS5h proxy",
                 proxy_url.scheme()
             ),
         ));
@@ -340,12 +389,15 @@ pub(crate) fn runtime_websocket_http_proxy_for_uri(
         ));
     };
     let host = runtime_websocket_normalize_host(host);
-    let port = proxy_url.port_or_known_default().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "runtime websocket proxy URL is missing a port",
-        )
-    })?;
+    let port = proxy_url
+        .port_or_known_default()
+        .or_else(|| matches!(proxy_url.scheme(), "socks5" | "socks5h").then_some(1080))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "runtime websocket proxy URL is missing a port",
+            )
+        })?;
     Ok(Some(RuntimeWebsocketHttpProxy {
         url: proxy_url,
         host,
@@ -354,13 +406,16 @@ pub(crate) fn runtime_websocket_http_proxy_for_uri(
 }
 
 pub(crate) fn runtime_websocket_establish_http_proxy_tunnel(
-    stream: &mut TcpStream,
+    stream: &mut crate::proxy_config::stream::ProxyStream,
     proxy: &RuntimeWebsocketHttpProxy,
     target: &RuntimeWebsocketTarget,
     io_timeout: Duration,
 ) -> io::Result<u16> {
-    stream.set_read_timeout(Some(io_timeout))?;
-    stream.set_write_timeout(Some(io_timeout))?;
+    use crate::proxy_config::stream::{ProxyHandshake, deadline};
+    let mut stream = ProxyHandshake {
+        stream,
+        deadline: deadline(io_timeout)?,
+    };
     let proxy_authorization =
         runtime_websocket_proxy_authorization_header(proxy.url.username(), proxy.url.password());
     let request =
@@ -368,7 +423,7 @@ pub(crate) fn runtime_websocket_establish_http_proxy_tunnel(
     stream.write_all(request.as_bytes())?;
     stream.flush()?;
 
-    let (status, response_bytes) = runtime_websocket_read_http_connect_response(stream)?;
+    let (status, response_bytes) = runtime_websocket_read_http_connect_response(&mut stream)?;
     if status != 200 {
         return Err(io::Error::other(format!(
             "runtime websocket proxy CONNECT returned HTTP {status} ({response_bytes} bytes)"

@@ -35,7 +35,15 @@ fn websocket_readiness_poll_preserves_partial_frame_and_next_buffered_frame() {
         // Keep the mock alive until both terminal messages are consumed.
         steps.recv_timeout(Duration::from_secs(5)).unwrap();
     });
-    let (mut client, _) = tungstenite::connect(format!("ws://{address}/")).unwrap();
+    let (mut client, _) = tungstenite::client_tls_with_config(
+        format!("ws://{address}/"),
+        crate::proxy_config::stream::ProxyStream::from(
+            std::net::TcpStream::connect(address).unwrap(),
+        ),
+        None,
+        None,
+    )
+    .unwrap();
     let original_timeout = Some(Duration::from_secs(3));
     transport(&client)
         .unwrap()

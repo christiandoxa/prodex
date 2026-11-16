@@ -4,6 +4,10 @@ use anyhow::Result;
 use reqwest::blocking::Client;
 
 mod client;
+pub(crate) mod socks;
+pub(crate) mod stream;
+mod tls;
+pub(crate) use tls::UpstreamTlsConfig;
 
 pub(crate) fn runtime_upstream_proxy_mode_label(explicit_no_proxy: bool) -> &'static str {
     client::UpstreamProxyMode::from_explicit_no_proxy(explicit_no_proxy).label()
@@ -48,6 +52,7 @@ fn build_runtime_streaming_http_client(
             ),
         },
         redirects,
+        &runtime_config.upstream_tls,
     )
 }
 
@@ -66,6 +71,7 @@ pub(crate) fn build_runtime_upstream_async_http_compact_client(
             ),
         },
         reqwest::redirect::Policy::default(),
+        &runtime_config.upstream_tls,
     )
 }
 

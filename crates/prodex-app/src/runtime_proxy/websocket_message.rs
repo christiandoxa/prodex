@@ -246,7 +246,6 @@ pub(super) mod test_support {
     use tiny_http::ReadWrite as TinyReadWrite;
     use tokio::runtime::Builder as TokioRuntimeBuilder;
     use tungstenite::Message as WsMessage;
-    use tungstenite::connect;
 
     pub(super) fn test_runtime_shared(name: &str) -> RuntimeRotationProxyShared {
         let root = env::temp_dir().join(format!(
@@ -323,8 +322,15 @@ pub(super) mod test_support {
             .local_addr()
             .expect("test websocket listener should expose an address");
         let client = thread::spawn(move || {
-            let (socket, _response) =
-                connect(format!("ws://{addr}")).expect("test websocket client should connect");
+            let (socket, _response) = tungstenite::client_tls_with_config(
+                format!("ws://{addr}"),
+                crate::proxy_config::stream::ProxyStream::from(
+                    std::net::TcpStream::connect(addr).unwrap(),
+                ),
+                None,
+                None,
+            )
+            .expect("test websocket client should connect");
             socket
         });
         let (server_stream, _addr) = listener

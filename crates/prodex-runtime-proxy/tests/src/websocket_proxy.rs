@@ -155,3 +155,12 @@ fn interleaves_socket_addrs_with_ipv6_preferred_when_available() {
         vec![v6_a, v4_a, v6_b, v4_b]
     );
 }
+
+#[test]
+fn proxy_authorization_decodes_url_credentials_without_form_plus_conversion() {
+    assert_eq!(
+        runtime_websocket_proxy_authorization_header("user%40example", Some("p%3Ass+word"))
+            .as_deref(),
+        Some("Basic dXNlckBleGFtcGxlOnA6c3Mrd29yZA=="),
+    );
+}

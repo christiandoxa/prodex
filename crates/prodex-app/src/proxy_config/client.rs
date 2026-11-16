@@ -43,10 +43,12 @@ pub struct AsyncUpstreamClientConfig {
 pub fn build_runtime_upstream_async_http_client(
     config: AsyncUpstreamClientConfig,
     redirects: reqwest::redirect::Policy,
+    tls: &super::UpstreamTlsConfig,
 ) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(config.connect_timeout)
-        .redirect(redirects);
+        .redirect(redirects)
+        .tls_certs_merge(tls.http_certificates());
     builder = match config.response_timeout {
         AsyncResponseTimeout::ReadIdle(timeout) => builder.read_timeout(timeout),
         AsyncResponseTimeout::Request(timeout) => builder.timeout(timeout),
@@ -70,9 +72,11 @@ pub struct BlockingUpstreamClientConfig {
 pub fn build_upstream_blocking_http_client(
     config: BlockingUpstreamClientConfig,
 ) -> Result<reqwest::blocking::Client> {
+    let tls = super::UpstreamTlsConfig::from_process()?;
     let mut builder = reqwest::blocking::Client::builder()
         .connect_timeout(config.connect_timeout)
-        .timeout(config.request_timeout);
+        .timeout(config.request_timeout)
+        .tls_certs_merge(tls.http_certificates());
     if config.proxy_mode == UpstreamProxyMode::Disabled {
         builder = builder.no_proxy();
     }
@@ -103,6 +107,7 @@ mod tests {
                 )),
             },
             reqwest::redirect::Policy::default(),
+            &super::super::UpstreamTlsConfig::default(),
         )
         .expect("streaming client should build");
         let runtime = test_tokio_runtime();
@@ -131,6 +136,7 @@ mod tests {
                 )),
             },
             reqwest::redirect::Policy::default(),
+            &super::super::UpstreamTlsConfig::default(),
         )
         .expect("compact client should build");
         let runtime = test_tokio_runtime();
@@ -153,6 +159,7 @@ mod tests {
                 response_timeout: AsyncResponseTimeout::Request(Duration::from_millis(200)),
             },
             reqwest::redirect::Policy::default(),
+            &super::super::UpstreamTlsConfig::default(),
         )
         .expect("compact client should build");
         let runtime = test_tokio_runtime();

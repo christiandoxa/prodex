@@ -177,7 +177,7 @@ struct RuntimeRotationProxy {
 }
 
 type RuntimeLocalWebSocket = WsSocket<Box<dyn TinyReadWrite + Send>>;
-type RuntimeUpstreamWebSocket = WsSocket<MaybeTlsStream<TcpStream>>;
+type RuntimeUpstreamWebSocket = WsSocket<MaybeTlsStream<proxy_config::stream::ProxyStream>>;
 
 fn runtime_set_upstream_websocket_io_timeout(
     socket: &mut RuntimeUpstreamWebSocket,

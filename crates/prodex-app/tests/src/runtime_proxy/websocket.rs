@@ -118,8 +118,15 @@ pub(super) fn websocket_test_local_pair() -> (RuntimeLocalWebSocket, RuntimeUpst
         .local_addr()
         .expect("test websocket listener should expose address");
     let client = thread::spawn(move || {
-        let (socket, _response) =
-            tungstenite::connect(format!("ws://{addr}")).expect("test websocket client connect");
+        let (socket, _response) = tungstenite::client_tls_with_config(
+            format!("ws://{addr}"),
+            crate::proxy_config::stream::ProxyStream::from(
+                std::net::TcpStream::connect(addr).unwrap(),
+            ),
+            None,
+            None,
+        )
+        .expect("test websocket client connect");
         socket
     });
     let (server_stream, _addr) = listener
