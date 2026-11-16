@@ -2,6 +2,88 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.169.1 - 2026-11-16
+
+### Runtime
+
+- Isolate reusable brokers by outbound transport identity (`690d7eb`)
+- Honor native proxy transports and custom certificate trust (`fcd85ad`)
+
+### Docs
+
+- Scope SOCKS qualification to owned transport (`c31b316`)
+- Distinguish native account discovery from inference transport (`8d2d561`)
+- Describe proxy resume and untrusted goal compatibility (`0a6dccc`)
+
+### Deps
+
+- Integrate reviewed Dependabot update #132 (`39a10cd`)
+- Integrate reviewed Dependabot update #131 (`800b5f0`)
+- Integrate reviewed Dependabot update #130 (`a5ca658`)
+- Integrate reviewed Dependabot update #129 (`c0b1558`)
+- Bump rust from `9181b56` to `e6f2cff` (`cef1cf5`)
+- Bump uuid in /fuzz in the fuzz-cargo group (`45b9943`)
+- Bump the cargo group with 5 updates (`2a10970`)
+
+### Misc
+
+- Keep external overlay goals and session indexes persistent (`4ad5fc2`)
+- Preserve untrusted goal context without replaying stale history (`dc938e4`)
+# Prodex 0.169.1
+
+Respect outbound proxy and certificate settings across native transports and session
+resume; preserve native goal context on local Chat Completions adapters.
+
+## New Features
+
+- Qualify native WebSocket forwarding through authenticated SOCKS5 and HTTPS proxies
+  while retaining endpoint-aware bypass rules and certificate validation.
+
+## Bug Fixes
+
+- Support HTTP CONNECT, HTTPS proxy tunnels, and SOCKS5/SOCKS5h for native WebSockets,
+  including proxy authentication and bounded negotiation. Preserve explicit proxy
+  bypass and `NO_PROXY`; never retry a failed configured proxy by silently dialing direct.
+- Apply `CODEX_CA_CERTIFICATE`, falling back to `SSL_CERT_FILE`, consistently to upstream
+  HTTP and WebSockets without disabling certificate verification.
+- Scope reusable runtime brokers to an opaque fingerprint of outbound proxy, bypass,
+  and custom trust settings. A new launch cannot inherit a stale broker's proxy;
+  existing sessions on that broker are left intact.
+- Keep SQLite session indexes, queues, and goals in the persistent source home for
+  external/profileless Super launches as well as managed profiles. A disposable
+  overlay no longer loses newly created goal state or hides saved sessions.
+- Preserve named, unpaired native context such as `goal_objective` as untrusted user-level
+  context when translating Responses to Chat Completions. Its item ID is not a tool-call
+  owner. Full-history local goal continuation no longer prepends cached conversation
+  items or duplicates reasoning; real delta-only tool replies retain history recovery.
+
+## Compatibility and Upgrade
+
+The qualified native client remains Codex CLI 0.169.0. UUID resume, `prodex resume`,
+interactive `/resume`, local API-key authentication, explicit model/context selection,
+reasoning logs, and compaction retain their existing contracts. Session history is not
+rewritten or truncated by these changes. RTK, Codebase Memory MCP, Playwright MCP,
+and Ponytail remain automatic in Super; Presidio still asks for consent.
+
+SOCKS transport qualification covers Prodex-owned inference and session continuation. Codex 0.169.0's own account-discovery HTTP client does not enable
+SOCKS support; ChatGPT discovery through a SOCKS-only listener remains an upstream
+limitation. Use the proxy's HTTP CONNECT listener for that native login path.
+Prodex does not bypass the selected proxy to conceal an unsupported upstream client.
+
+Issue #128 reports a pre-commit failure without its exact proxy configuration or
+transport log. This release addresses independently reproduced proxy compatibility
+gaps; the reporter's deployment still needs confirmation with the updated version.
+
+## Changelog
+
+- Integrate Dependabot #129 and #130: arc-swap 1.9.5, rpassword 7.5.5, rusqlite 0.42.0,
+  uuid 1.29.2, zstd 0.14.4, and their reviewed lockfile updates, including fuzz metadata.
+- Integrate Dependabot #131: SonarQube scan action 8.5.0, pinned to its immutable commit.
+- Integrate Dependabot #132: refresh the Rust 1.99.1 Bookworm image digest without
+  changing the selected Rust compiler version.
+
+Full Changelog: [0.169.0...0.169.1](https://github.com/christiandoxa/prodex/compare/0.169.0...0.169.1)
+
 ## 0.169.0 - 2026-11-13
 
 ### Runtime
@@ -12,53 +94,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Retain cold-cache bootstrap with cache-first Playwright (`df2fa86`)
 - Keep Playwright startup independent of npm registry (`28c454d`)
-# Prodex 0.169.0
-
-Qualify Codex CLI 0.169.0 while retaining native trust, authentication, resume,
-and transport behavior in ordinary Prodex and Super launches.
-
-## New Features
-
-- Advance the tested Codex baseline from 0.167.2 to the pinned 0.169.0 source and official binary.
-- Guard credential-source-bound request setup, runtime WebSocket reauthentication,
-  prompt-cache options, and bounded multi-frame native requests.
-- Refresh the app-server lifecycle schema hashes after reviewing optional moderation
-  metadata, inference-hook errors, and file-backed audio alternatives.
-
-## Bug Fixes
-
-- Restore the native 1 MiB upstream WebSocket frame bound after request routing and redaction. Large Unicode requests remain one text message, with backpressure between frames and unchanged transport failure/affinity handling.
-
-- Prefer cached npm metadata for default Playwright discovery, Super startup and expose aliases. This avoids redundant registry refreshes for prepared packages while retaining cold-cache bootstrap, no-install behavior and explicit user MCP configuration.
-
-- Follow extracted upstream authentication and provider-test owners without dropping
-  custom-provider credential isolation checks.
-- Preserve security-notice identity and no-redirect checks after their move from the
-  TUI to app-server, including the TUI's final account and HTTPS action validation.
-- Add regression coverage proving Smart Context retains incremental exec definitions,
-  removal notices and prompt-cache TTL settings with exact request reconstruction.
-- Verify native terminal runtime, workspace and policy errors are not reclassified
-  as quota, overload or continuation-recovery signals.
-
-## Compatibility and Upgrade
-
-Native Codex owns explicit `exec --trust`, saved-provider restoration, observed MCP
-startup rounds and compaction retry policy. Prodex does not automatically grant
-project trust or enable experimental incremental-exec features. Existing local
-API keys, explicit model/context choices, UUID resume, `/resume`, reasoning logs
-and compaction remain supported. Compatible installed RTK, Codebase Memory MCP,
-Playwright MCP and Ponytail remain automatic in Super; Presidio still asks for consent.
-
-Interactive qualification uses isolated loopback services and synthetic credentials;
-it is not a claim of live-provider coverage or equivalent capabilities across models.
-The supported Codex minimum remains capability-based. Update Codex separately to
-0.169.0 to use the newly qualified native behavior.
-
-## Changelog
-
-- Qualify Kiro CLI 3.3.0 for native release checks; retain the existing runtime minimum.
-
-Full Changelog: [0.167.8...0.169.0](https://github.com/christiandoxa/prodex/compare/0.167.8...0.169.0)
 
 ## 0.167.8 - 2026-11-12
 
@@ -149,13 +184,3 @@ Full Changelog: [0.167.8...0.169.0](https://github.com/christiandoxa/prodex/comp
 
 - Remove default request body size ceiling (`616792a`)
 - Preserve large payloads during request handling (`d59e47e`)
-
-## 0.166.3 - 2026-11-01
-
-### Misc
-
-- Retain maintainer attribution and signed ancestry (`efbbaf1`)
-- Reject reintroduction of pre-cleanup Git roots (`b0715b3`)
-- Prevent incident data from returning to tracked source (`ff640fc`)
-- Qualify warm tokenizer startup and stable tool integration (`d437f5e`)
-- Enforce safe automatic Smart Context on all launches (`f9a8af2`)
