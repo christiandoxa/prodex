@@ -27,6 +27,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Qualify 0.0.21 and isolate ambient endpoint settings (`5d8797a`)
 - Keep external overlay goals and session indexes persistent (`4ad5fc2`)
 - Preserve untrusted goal context without replaying stale history (`dc938e4`)
 # Prodex 0.169.1
@@ -75,6 +76,9 @@ transport log. This release addresses independently reproduced proxy compatibili
 gaps; the reporter's deployment still needs confirmation with the updated version.
 
 ## Changelog
+
+- Qualify official tunnel-client 0.0.21; isolate its new ambient residency, OAuth-discovery,
+  and admin-UI settings without clearing proxy or bypass variables.
 
 - Integrate Dependabot #129 and #130: arc-swap 1.9.5, rpassword 7.5.5, rusqlite 0.42.0,
   uuid 1.29.2, zstd 0.14.4, and their reviewed lockfile updates, including fuzz metadata.
