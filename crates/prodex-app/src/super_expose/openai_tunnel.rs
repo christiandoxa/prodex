@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 const OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION: &str = "0.0.13";
-const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.20";
+const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.21";
 const OPENAI_TUNNEL_CLIENT_RELEASE_URL: &str =
     "https://github.com/openai/tunnel-client/releases/latest";
 const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {
@@ -334,6 +334,12 @@ fn remove_inherited_tunnel_configuration(command: &mut Command) {
         "TUNNEL_CLIENT_PROFILE_FILE",
         "TUNNEL_CLIENT_PROFILE_DIR",
         "CONTROL_PLANE_BASE_URL",
+        // The managed tunnel pins its endpoint and automatic OAuth discovery.
+        // Unrelated 0.0.21 regional/UI settings must not override that contract.
+        "CONTROL_PLANE_RESIDENCY",
+        "MCP_OAUTH_DISCOVERY",
+        "ADMIN_UI_BASE_PATH",
+        "ADMIN_UI_PUBLIC_ORIGIN",
         "CONTROL_PLANE_URL_PATH",
         "CONTROL_PLANE_TUNNEL_ID",
         "CONTROL_PLANE_POLL_CHANNELS",
@@ -615,7 +621,7 @@ mod version_policy_tests {
                 "0.0.20",
             ),
             (
-                "0.0.21+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+                "0.0.21+714f2d67844b660af25754f1d19b0360b346b13b (git sha: 714f2d67844b660af25754f1d19b0360b346b13b)",
                 "0.0.21",
             ),
         ] {
@@ -664,11 +670,17 @@ mod version_policy_tests {
         let variables = [
             ("MCP_STDIO_FAILURE_POLICY", "unrelated-stdio-policy"),
             ("HARPOON_OAUTH_FORWARD_ORIGINS", "https://auth.example.com"),
+            ("CONTROL_PLANE_RESIDENCY", "eu"),
+            ("MCP_OAUTH_DISCOVERY", "disabled"),
+            ("ADMIN_UI_BASE_PATH", "/unrelated-tunnel"),
+            ("ADMIN_UI_PUBLIC_ORIGIN", "https://admin.example.com"),
         ];
         for (variable, value) in variables {
             command.env(variable, value);
         }
         command.env("PATH", "synthetic-search-path");
+        command.env("HTTPS_PROXY", "http://proxy.example.com:8080");
+        command.env("NO_PROXY", "localhost,127.0.0.1");
         remove_inherited_tunnel_configuration(&mut command);
         let overrides = command
             .get_envs()
@@ -680,6 +692,14 @@ mod version_policy_tests {
                 "the HTTP tunnel must isolate inherited {variable}",
             );
         }
+        assert_eq!(
+            overrides.get(std::ffi::OsStr::new("HTTPS_PROXY")),
+            Some(&Some(std::ffi::OsStr::new("http://proxy.example.com:8080")))
+        );
+        assert_eq!(
+            overrides.get(std::ffi::OsStr::new("NO_PROXY")),
+            Some(&Some(std::ffi::OsStr::new("localhost,127.0.0.1")))
+        );
         assert_eq!(
             overrides.get(std::ffi::OsStr::new("PATH")),
             Some(&Some(std::ffi::OsStr::new("synthetic-search-path"))),
