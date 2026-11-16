@@ -20,11 +20,15 @@ mod request_params;
 mod request_policy;
 mod request_probe;
 mod request_tools;
+#[cfg(test)]
+#[path = "deepseek_bridge/tests/untrusted_context.rs"]
+mod untrusted_context_tests;
 
 pub use self::input_items::{
     deepseek_provider_core_chat_role, deepseek_provider_core_first_function_call_output_call_id,
     deepseek_provider_core_history_has_system_message,
-    deepseek_provider_core_history_has_tool_call, deepseek_provider_core_message_signatures,
+    deepseek_provider_core_history_has_tool_call,
+    deepseek_provider_core_is_standalone_context_output, deepseek_provider_core_message_signatures,
     deepseek_provider_core_push_message_from_responses_item, deepseek_provider_core_system_message,
     deepseek_provider_core_tool_call_ids, deepseek_provider_core_tool_output_call_ids,
     deepseek_provider_core_user_message, deepseek_provider_core_validate_supported_input_item,

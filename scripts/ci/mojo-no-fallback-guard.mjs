@@ -6778,7 +6778,11 @@ export function findViolations(files) {
         "DEEPSEEK_BUFFERED_OUTPUT_TEXT_ITEM: Int64 = 51",
         "def deepseek_write_output_text_item(",
         "deepseek_write_output_text_item(writer, input.delta)",
-        "and input.operation <= DEEPSEEK_BUFFERED_OUTPUT_TEXT_ITEM",
+        "and input.operation <= DEEPSEEK_STANDALONE_CONTEXT_OUTPUT",
+    "comptime DEEPSEEK_STANDALONE_CONTEXT_OUTPUT: Int64 = 52",
+    "def deepseek_raw_standalone_context_output",
+    "def deepseek_raw_put_standalone_context_output",
+    "is_output and not deepseek_raw_standalone_context_output(view, item)",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": shared DeepSeek buffered text builder missing " + marker);
     }

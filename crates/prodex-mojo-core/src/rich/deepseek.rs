@@ -71,6 +71,7 @@ pub enum DeepSeekKernelOperation {
     ChatAssistantMessages = 49,
     StreamErrorClassification = 50,
     BufferedOutputTextItem = 51,
+    StandaloneContextOutput = 52,
 }
 
 #[repr(i64)]
@@ -341,6 +342,7 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::ChatAssistantMessages => 49,
         DeepSeekKernelOperation::StreamErrorClassification => 50,
         DeepSeekKernelOperation::BufferedOutputTextItem => 51,
+        DeepSeekKernelOperation::StandaloneContextOutput => 52,
     }
 }
 
@@ -388,7 +390,11 @@ fn kernel_output_capacity(
     if operation == DeepSeekKernelOperation::ResponsesHistoryCallId {
         return Ok(input_bytes.max(4));
     }
-    if operation == DeepSeekKernelOperation::ResponsesHistoryContainsCallId {
+    if matches!(
+        operation,
+        DeepSeekKernelOperation::ResponsesHistoryContainsCallId
+            | DeepSeekKernelOperation::StandaloneContextOutput
+    ) {
         return Ok(8);
     }
     if operation == DeepSeekKernelOperation::ResponseMetadata {

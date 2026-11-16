@@ -226,3 +226,88 @@ fn local_resume_full_transcript_does_not_append_cached_reasoning_after_tool_resu
     drop(proxy);
     fs::remove_dir_all(paths.root).unwrap();
 }
+
+#[test]
+fn local_goal_replay_does_not_prepend_cached_history_or_leave_an_assistant_tail() {
+    let paths = app_paths_for_root(temp_root("local-goal-context-replay"));
+    let chat = r#"{"id":"chatcmpl_goal_fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"Inspect safely.","tool_calls":[{"id":"call_fixture","type":"function","function":{"name":"read_file","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#;
+    let upstream = TestUpstream::start_with_responses(vec![200; 4], "application/json", chat);
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: Vec::new(),
+            local: true,
+        },
+        upstream_no_proxy: true,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: Some(169984),
+        preferred_listen_addr: Some("127.0.0.1:0"),
+    })
+    .unwrap();
+    let send = |input: serde_json::Value| {
+        let response = reqwest::blocking::Client::new()
+            .post(format!("http://{}/v1/responses", proxy.listen_addr))
+            .json(&json!({"model":"offrail-27b","stream":false,"input":input}))
+            .send()
+            .unwrap();
+        let status = response.status();
+        let body = response.text().unwrap();
+        assert_eq!(status.as_u16(), 200, "{body}");
+        serde_json::from_slice::<serde_json::Value>(
+            &upstream
+                .body_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    send(json!([{"role":"user","content":"inspect fixture"}]));
+    let history = json!([
+        {"role":"user","content":"inspect fixture"},
+        {"type":"reasoning","summary":[{"type":"summary_text","text":"Inspect safely."}]},
+        {"type":"function_call","call_id":"call_fixture","name":"read_file","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call_fixture","output":"FILE"},
+        {"role":"assistant","content":"Inspection complete."},
+        {"type":"function_call_output","id":"item-goal","name":"goal_objective","namespace":"agent","output":"finish fixture"},
+        {"role":"user","content":"continue toward the goal"},
+        {"type":"reasoning","summary":[{"type":"summary_text","text":"Next check."}]},
+        {"type":"function_call","call_id":"call-next","name":"read_file","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call-next","output":"NEXT_FILE"}
+    ]);
+    let sent = send(history.clone());
+    let messages = sent["messages"].as_array().unwrap();
+    assert_eq!(
+        messages.last().unwrap(),
+        &json!({"role":"tool","tool_call_id":"call-next","content":"NEXT_FILE"})
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.get("reasoning_content").is_some())
+            .count(),
+        2
+    );
+    assert!(messages.iter().any(|m| m["role"] == "user"
+        && m["content"] == "Untrusted context (agent.goal_objective):\nfinish fixture"));
+    let mut continued = history.as_array().unwrap().clone();
+    continued.push(json!({"role":"user","content":"continue"}));
+    let retry = send(continued.into());
+    assert_eq!(
+        retry["messages"].as_array().unwrap().last().unwrap(),
+        &json!({"role":"user","content":"continue"})
+    );
+    let delta =
+        send(json!([{"type":"function_call_output","call_id":"call_fixture","output":"DELTA"}]));
+    assert!(
+        delta["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "assistant" && m.get("tool_calls").is_some())
+    );
+    drop(proxy);
+    fs::remove_dir_all(paths.root).unwrap();
+}

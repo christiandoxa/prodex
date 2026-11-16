@@ -22,6 +22,26 @@ pub fn deepseek_provider_core_validate_supported_input_item(
     validate_input_item_mojo(item, gemini_compat, provider_label)
 }
 
+/// Recognize native untrusted context records without inventing a tool-call owner.
+/// The compiled classifier is shared with input validation and message lowering.
+pub fn deepseek_provider_core_is_standalone_context_output(
+    item: &serde_json::Value,
+) -> Result<bool, String> {
+    // Classification needs metadata only, not potentially large context contents.
+    let metadata = serde_json::json!({"type":item.get("type"), "name":item.get("name"),
+        "call_id":item.get("call_id"), "tool_call_id":item.get("tool_call_id")});
+    let source = serde_json::to_string(&metadata)
+        .map_err(|_| "standalone context metadata cannot be serialized".to_owned())?;
+    let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+        prodex_mojo_core::rich::DeepSeekKernelOperation::StandaloneContextOutput,
+    );
+    input.item = Some(&source);
+    let output = prodex_mojo_core::rich::deepseek_kernel(input)
+        .map_err(|_| "standalone context metadata exceeds supported limits".to_owned())?;
+    serde_json::from_slice(&output)
+        .map_err(|_| "compiled standalone context classification is invalid".to_owned())
+}
+
 pub fn deepseek_provider_core_system_message(content: &str) -> serde_json::Value {
     let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
         prodex_mojo_core::rich::DeepSeekKernelOperation::SystemMessage,
@@ -55,6 +75,8 @@ pub fn deepseek_provider_core_push_message_from_responses_item(
         .or_else(|| object.get("id"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or("call_0");
+    let standalone_context = deepseek_provider_core_is_standalone_context_output(item)
+        .expect("validated input metadata must fit the compiled classifier");
     let kind = prodex_mojo_core::rich::deepseek_replay_item_kind(item_type)
         .expect("compiled Mojo DeepSeek replay item classification failed");
     // The host resolves role/content text and history-key membership; the
@@ -84,8 +106,8 @@ pub fn deepseek_provider_core_push_message_from_responses_item(
     let action = prodex_mojo_core::rich::deepseek_replay_item_action(
         kind,
         prodex_mojo_core::rich::DeepSeekReplayItemFacts {
-            replayed_call: replayed_tool_call_ids.contains(call_id),
-            replayed_output: replayed_tool_output_call_ids.contains(call_id),
+            replayed_call: !standalone_context && replayed_tool_call_ids.contains(call_id),
+            replayed_output: !standalone_context && replayed_tool_output_call_ids.contains(call_id),
             output_field_mask,
             text_blank,
             text_duplicate,

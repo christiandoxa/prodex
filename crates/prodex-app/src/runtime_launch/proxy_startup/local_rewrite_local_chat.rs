@@ -55,7 +55,7 @@ pub(super) fn send_local_chat_request(
     // producing an invalid assistant-prefill tail in llama.cpp templates.
     // Delta-only tool replies and opaque response continuations still need their cache.
     let conversations = if is_local_chat_history_replay(shared, request)
-        && local_chat_input_is_self_contained(&value)
+        && local_chat_input_is_self_contained(&value)?
     {
         super::deepseek_rewrite::RuntimeDeepSeekConversationStore::default()
     } else {
@@ -162,20 +162,27 @@ pub(super) fn is_local_chat_history_replay(
 
 /// The compiled classifier owns input kinds; this host check only decides whether
 /// persisted tool-call cache lookup is necessary for the supplied JSON records.
-fn local_chat_input_is_self_contained(value: &serde_json::Value) -> bool {
+fn local_chat_input_is_self_contained(value: &serde_json::Value) -> Result<bool> {
     use prodex_mojo_core::rich::{DeepSeekReplayItemKind, deepseek_replay_item_kind};
     let Some(input) = value.get("input") else {
-        return false;
+        return Ok(false);
     };
     if input.is_string() {
-        return true;
+        return Ok(true);
     }
     let Some(items) = input.as_array() else {
-        return false;
+        return Ok(false);
     };
     let mut calls = std::collections::BTreeSet::new();
     let mut outputs = Vec::new();
     for item in items {
+        // /goal and other native context records have no originating tool call.
+        // Their item IDs must not make a full transcript appear delta-only.
+        if prodex_provider_core::deepseek_provider_core_is_standalone_context_output(item)
+            .map_err(anyhow::Error::msg)?
+        {
+            continue;
+        }
         let id = item
             .get("call_id")
             .or_else(|| item.get("tool_call_id"))
@@ -189,10 +196,10 @@ fn local_chat_input_is_self_contained(value: &serde_json::Value) -> bool {
             }
             Ok(DeepSeekReplayItemKind::Output) => outputs.push(id),
             Ok(_) => {}
-            Err(_) => return false,
+            Err(_) => return Ok(false),
         }
     }
-    outputs
+    Ok(outputs
         .into_iter()
-        .all(|id| id.is_some_and(|id| calls.contains(id)))
+        .all(|id| id.is_some_and(|id| calls.contains(id))))
 }

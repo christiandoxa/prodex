@@ -111,6 +111,7 @@ comptime DEEPSEEK_INPUT_ITEM_VALIDATION: Int64 = 48
 comptime DEEPSEEK_CHAT_ASSISTANT_MESSAGES: Int64 = 49
 comptime DEEPSEEK_STREAM_ERROR_CLASSIFICATION: Int64 = 50
 comptime DEEPSEEK_BUFFERED_OUTPUT_TEXT_ITEM: Int64 = 51
+comptime DEEPSEEK_STANDALONE_CONTEXT_OUTPUT: Int64 = 52
 comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
 comptime DEEPSEEK_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
@@ -3562,6 +3563,12 @@ def deepseek_write_operation(
         return deepseek_raw_common_request(writer, input)
     if operation == DEEPSEEK_RAW_BRIDGE_INPUT_ITEM:
         return deepseek_raw_bridge_input_item(writer, input)
+    if operation == DEEPSEEK_STANDALONE_CONTEXT_OUTPUT:
+        if input.item_present != 1 or not deepseek_json_fragment_valid(input.item):
+            return False
+        var item = deepseek_raw_root(input.item)
+        return deepseek_put_literal(writer, StringSlice("true") if deepseek_raw_standalone_context_output(input.item, item) else StringSlice("false"))
+
     if operation == DEEPSEEK_RESPONSES_HISTORY_CALL_ID:
         return deepseek_responses_history_call_id(writer, input)
     if operation == DEEPSEEK_RESPONSES_HISTORY_CONTAINS_CALL_ID:
@@ -3840,7 +3847,7 @@ def deepseek_flag_valid(value: Int64) -> Bool:
 def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     return (
         input.operation >= DEEPSEEK_REQUEST_BODY
-        and input.operation <= DEEPSEEK_BUFFERED_OUTPUT_TEXT_ITEM
+        and input.operation <= DEEPSEEK_STANDALONE_CONTEXT_OUTPUT
         and
         deepseek_flag_valid(input.stream)
         and deepseek_flag_valid(input.response_id_present)
@@ -5983,6 +5990,51 @@ def deepseek_raw_put_bridge_message(
     return True
 
 
+# Native named outputs without a call owner are untrusted context, not tool
+# replies. The item id identifies a record, never an assistant function call.
+def deepseek_raw_standalone_context_output(
+    view: ProdexRichStringView, item: Array[Int64, 2],
+) -> Bool:
+    if not deepseek_json_bounds_is_kind(view, item, 123):
+        return False
+    var kind = deepseek_raw_member(view, item, StringSlice("type"))
+    if not deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("function_call_output")):
+        return False
+    var name = deepseek_raw_member(view, item, StringSlice("name"))
+    if not deepseek_raw_trimmed_string_nonempty(view, name):
+        return False
+    for index in range(2):
+        var field = StringSlice("call_id") if index == 0 else StringSlice("tool_call_id")
+        var owner = deepseek_raw_member(view, item, field)
+        if deepseek_raw_present(owner) and deepseek_json_byte(view, owner[0]) != 110:
+            return False
+    return True
+
+
+def deepseek_raw_put_standalone_context_output(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView, item: Array[Int64, 2],
+) -> Bool:
+    var name = deepseek_raw_member(view, item, StringSlice("name"))
+    var namespace = deepseek_raw_member(view, item, StringSlice("namespace"))
+    var output = deepseek_raw_member(view, item, StringSlice("output"))
+    if not deepseek_raw_present(output):
+        return False
+    if not deepseek_put_literal(writer, StringSlice('{"role":"user","content":"Untrusted context (')):
+        return False
+    if deepseek_raw_trimmed_string_nonempty(view, namespace):
+        if not deepseek_put_view_range(writer, view, namespace[0] + 1, namespace[1] - 1) or not deepseek_put_byte(writer, 46):
+            return False
+    if not deepseek_put_view_range(writer, view, name[0] + 1, name[1] - 1) or not deepseek_put_literal(writer, StringSlice('):\\n')):
+        return False
+    if deepseek_json_bounds_is_kind(view, output, 34):
+        if not deepseek_put_view_range(writer, view, output[0] + 1, output[1] - 1):
+            return False
+    elif not deepseek_raw_put_nested_raw_json_token(writer, view, output):
+        return False
+    return deepseek_put_literal(writer, StringSlice('"}'))
+
+
 def deepseek_raw_bridge_input_item(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     input: ProdexDeepSeekKernelInput,
@@ -6059,6 +6111,9 @@ def deepseek_raw_bridge_input_item(
         if not deepseek_put_literal(writer, StringSlice('{"role":"assistant","content":"","reasoning_content":')):
             return False
         if not deepseek_raw_text_from_content(writer, view, parts) or not deepseek_put_byte(writer, 125):
+            return False
+    elif is_output and deepseek_raw_standalone_context_output(view, item):
+        if not deepseek_raw_put_standalone_context_output(writer, view, item):
             return False
     elif is_output:
         if input.stream == 1 and not deepseek_raw_put_tool_output_message_from_item(
@@ -6265,7 +6320,7 @@ def deepseek_input_item_validation(
                     detail[1] = content_result[2]
                 return deepseek_input_item_issue(writer, content_result[0], view, detail)
         return deepseek_input_item_issue(writer, 0, view, missing)
-    if is_call or is_shell or is_output:
+    if is_call or is_shell or (is_output and not deepseek_raw_standalone_context_output(view, root)):
         var call_id = deepseek_raw_first_string_member3(view, root, StringSlice("call_id"), StringSlice("tool_call_id"), StringSlice("id"))
         if not deepseek_raw_trimmed_string_nonempty(view, call_id):
             return deepseek_input_item_issue(writer, 10, view, missing)
@@ -6572,7 +6627,7 @@ def deepseek_responses_history_call_id(
                     view, kind[0], kind[1], StringSlice("mcp_tool_result")
                 )
             )
-            if is_output:
+            if is_output and not deepseek_raw_standalone_context_output(view, item):
                 var call_id = deepseek_raw_member(
                     view, item, StringSlice("call_id")
                 )
