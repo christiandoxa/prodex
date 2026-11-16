@@ -170,9 +170,11 @@ pub(crate) fn find_compatible_runtime_broker_registry(
         client,
         paths,
         excluded_broker_key,
-        upstream_base_url,
-        include_code_review,
-        upstream_no_proxy,
+        RuntimeBrokerSmartContextOptions::disabled().launch_config(
+            upstream_base_url,
+            include_code_review,
+            upstream_no_proxy,
+        ),
         RuntimeBrokerSmartContextOptions::disabled(),
         &RuntimeConfig::compatibility_current().upstream_transport_identity,
     )
@@ -182,9 +184,7 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
     client: &Client,
     paths: &AppPaths,
     excluded_broker_key: &str,
-    upstream_base_url: &str,
-    include_code_review: bool,
-    upstream_no_proxy: bool,
+    launch_config: prodex_runtime_broker::RuntimeBrokerLaunchConfig<'_>,
     smart_context: RuntimeBrokerSmartContextOptions,
     upstream_transport_identity: &str,
 ) -> Result<Option<(String, RuntimeBrokerRegistry)>> {
@@ -192,8 +192,6 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
         return Ok(None);
     }
 
-    let launch_config =
-        smart_context.launch_config(upstream_base_url, include_code_review, upstream_no_proxy);
     for broker_key in runtime_broker_registry_keys(paths) {
         if broker_key == excluded_broker_key {
             continue;
@@ -450,9 +448,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
             &broker_client,
             paths,
             &broker_key,
-            upstream_base_url,
-            include_code_review,
-            upstream_no_proxy,
+            launch_config,
             smart_context,
             &runtime_config.upstream_transport_identity,
         )?
