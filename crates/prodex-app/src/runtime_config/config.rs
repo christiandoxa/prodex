@@ -479,6 +479,9 @@ impl runtime_config::RuntimeConfig {
                 crate::proxy_config::UpstreamTlsConfig::default()
             }
         };
+        let upstream_transport_identity = parser
+            .environment
+            .upstream_transport_identity(upstream_tls.identity());
         let gemini = gemini::parse_gemini(parser);
         Self {
             tuning,
@@ -583,6 +586,7 @@ impl runtime_config::RuntimeConfig {
                 no_proxy,
             },
             upstream_tls,
+            upstream_transport_identity,
             governance: prodex_config::GovernanceConfig::personal_compatible(),
             tenant_detector_patterns:
                 crate::runtime_proxy::presidio::local::RuntimeTenantDetectorPatterns,

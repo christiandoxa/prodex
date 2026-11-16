@@ -12,6 +12,7 @@ const MAX_CA_BUNDLE_BYTES: u64 = 4 * 1024 * 1024;
 #[derive(Clone, Default)]
 pub(crate) struct UpstreamTlsConfig {
     certificates: Vec<reqwest::Certificate>,
+    ca_digest: Option<String>,
     websocket: Option<Arc<rustls::ClientConfig>>,
 }
 
@@ -44,6 +45,8 @@ impl UpstreamTlsConfig {
         let native = rustls_native_certs::load_native_certs();
         roots.add_parsable_certificates(native.certs);
         let mut certificates = Vec::new();
+        use sha2::{Digest, Sha256};
+        let mut digest = Sha256::new();
         if let Some((key, path)) = selected {
             if !std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
                 bail!("{key} must select a readable regular PEM certificate file");
@@ -63,6 +66,8 @@ impl UpstreamTlsConfig {
             for certificate in CertificateDer::pem_slice_iter(&bytes) {
                 let certificate = certificate
                     .map_err(|_| anyhow::anyhow!("{key} contains malformed PEM certificates"))?;
+                digest.update((certificate.len() as u64).to_be_bytes());
+                digest.update(certificate.as_ref());
                 roots
                     .add(certificate.clone())
                     .map_err(|_| anyhow::anyhow!("{key} contains an invalid root certificate"))?;
@@ -86,10 +91,22 @@ impl UpstreamTlsConfig {
         .context("failed to configure upstream TLS protocol versions")?
         .with_root_certificates(roots)
         .with_no_client_auth();
+        let ca_digest = (!certificates.is_empty()).then(|| {
+            digest
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        });
         Ok(Self {
             certificates,
+            ca_digest,
             websocket: Some(Arc::new(websocket)),
         })
+    }
+
+    pub(crate) fn identity(&self) -> Option<&str> {
+        self.ca_digest.as_deref()
     }
 
     pub(crate) fn http_certificates(&self) -> impl Iterator<Item = reqwest::Certificate> + '_ {

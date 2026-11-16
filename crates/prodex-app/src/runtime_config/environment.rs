@@ -95,6 +95,7 @@ const RUNTIME_CONFIG_ENV_KEYS: &[&str] = &[
     "PRODEX_GEMINI_STICKY_FRESH_OAUTH",
     "CODEX_CA_CERTIFICATE",
     "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
     "HTTPS_PROXY",
     "https_proxy",
     "HTTP_PROXY",
@@ -113,6 +114,46 @@ pub(super) struct RuntimeConfigEnvironment {
 }
 
 impl RuntimeConfigEnvironment {
+    pub(super) fn upstream_transport_identity(&self, ca_digest: Option<&str>) -> String {
+        use sha2::{Digest, Sha256};
+        let mut digest = Sha256::new();
+        digest.update(b"prodex-upstream-transport-v1");
+        for key in [
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "PROXY",
+            "proxy",
+            "NO_PROXY",
+            "no_proxy",
+            "CODEX_CA_CERTIFICATE",
+            "SSL_CERT_FILE",
+            "SSL_CERT_DIR",
+        ] {
+            digest.update(key.as_bytes());
+            match self.get(key) {
+                Some(value) => {
+                    let bytes = value.as_encoded_bytes();
+                    digest.update([1]);
+                    digest.update((bytes.len() as u64).to_be_bytes());
+                    digest.update(bytes);
+                }
+                None => digest.update([0]),
+            }
+        }
+        if let Some(ca_digest) = ca_digest {
+            digest.update(ca_digest.as_bytes());
+        }
+        digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    }
+
     pub(super) fn read_process() -> Self {
         Self::read_with(|key| env::var_os(key))
     }
@@ -403,5 +444,53 @@ mod tests {
         );
         assert_eq!(parser.errors[0].message, "must be valid Unicode");
         assert!(!format!("{:?}", parser.errors).contains("ff"));
+    }
+    #[test]
+    fn broker_transport_identity_tracks_proxy_bypass_and_trust_without_plaintext() {
+        let identity = |key: &str, value: &str, ca: Option<&str>| {
+            RuntimeConfigEnvironment::read_with(|name| (name == key).then(|| OsString::from(value)))
+                .upstream_transport_identity(ca)
+        };
+        let baseline = identity("", "", None);
+        assert_eq!(baseline.len(), 64);
+        assert_eq!(baseline, identity("", "", None));
+        for key in [
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+            "CODEX_CA_CERTIFICATE",
+            "SSL_CERT_FILE",
+            "SSL_CERT_DIR",
+        ] {
+            let first = identity(key, "fixture-private-value-a", None);
+            assert_ne!(first, baseline, "{key}");
+            assert_ne!(
+                first,
+                identity(key, "fixture-private-value-b", None),
+                "{key}"
+            );
+            assert_ne!(
+                first,
+                identity(key, "fixture-private-value-a", Some("changed-ca")),
+                "{key}"
+            );
+            assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            assert!(!first.contains("fixture-private-value"));
+        }
+        assert_ne!(baseline, identity("HTTPS_PROXY", "", None));
+        assert_ne!(baseline, identity("", "", Some("root-a")));
+        assert_ne!(
+            identity("", "", Some("root-a")),
+            identity("", "", Some("root-b"))
+        );
+        assert_eq!(
+            baseline,
+            identity("UNRELATED_VARIABLE", "unchanged-routing", None)
+        );
     }
 }

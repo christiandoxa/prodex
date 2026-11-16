@@ -28,6 +28,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) log_format: RuntimeLogFormat,
     pub(crate) response_chain_trace: bool,
     pub(crate) websocket_environment: RuntimeWebsocketEnvironment,
+    pub(crate) upstream_transport_identity: String,
     pub(crate) upstream_tls: crate::proxy_config::UpstreamTlsConfig,
     pub(crate) governance: prodex_config::GovernanceConfig,
     pub(crate) tenant_detector_patterns:

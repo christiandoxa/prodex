@@ -35,7 +35,8 @@ impl RuntimeBrokerSmartContextOptions {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct RuntimeBrokerWaitOptions {
+struct RuntimeBrokerWaitOptions<'a> {
+    upstream_transport_identity: &'a str,
     smart_context: RuntimeBrokerSmartContextOptions,
     ready_timeout: Duration,
 }
@@ -89,6 +90,8 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
         RuntimeBrokerWaitOptions {
             smart_context: RuntimeBrokerSmartContextOptions::disabled(),
             ready_timeout,
+            upstream_transport_identity: &RuntimeConfig::compatibility_current()
+                .upstream_transport_identity,
         },
     )
 }
@@ -100,7 +103,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
     upstream_base_url: &str,
     include_code_review: bool,
     upstream_no_proxy: bool,
-    wait: RuntimeBrokerWaitOptions,
+    wait: RuntimeBrokerWaitOptions<'_>,
 ) -> Result<Option<RuntimeBrokerRegistry>> {
     let started_at = Instant::now();
     let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
@@ -112,6 +115,10 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
             return Ok(None);
         };
 
+        if existing.upstream_transport_identity.as_deref() != Some(wait.upstream_transport_identity)
+        {
+            return Ok(None);
+        }
         if discard_stale_runtime_broker_registry(paths, broker_key, &existing) {
             return Ok(None);
         }
@@ -167,6 +174,7 @@ pub(crate) fn find_compatible_runtime_broker_registry(
         include_code_review,
         upstream_no_proxy,
         RuntimeBrokerSmartContextOptions::disabled(),
+        &RuntimeConfig::compatibility_current().upstream_transport_identity,
     )
 }
 
@@ -178,6 +186,7 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
     include_code_review: bool,
     upstream_no_proxy: bool,
     smart_context: RuntimeBrokerSmartContextOptions,
+    upstream_transport_identity: &str,
 ) -> Result<Option<(String, RuntimeBrokerRegistry)>> {
     if !smart_context.supports_cross_broker_reuse() {
         return Ok(None);
@@ -193,7 +202,9 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
         let Some(registry) = load_runtime_broker_registry(paths, &broker_key)? else {
             continue;
         };
-        if !launch_config.matches_registry(&registry) {
+        if registry.upstream_transport_identity.as_deref() != Some(upstream_transport_identity)
+            || !launch_config.matches_registry(&registry)
+        {
             continue;
         }
         if discard_stale_runtime_broker_registry(paths, &broker_key, &registry) {
@@ -350,6 +361,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         upstream_no_proxy,
         smart_context_enabled,
         model_context_window_tokens,
+        &runtime_config.upstream_transport_identity,
     );
     let smart_context = RuntimeBrokerSmartContextOptions {
         enabled: smart_context_enabled,
@@ -376,6 +388,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         RuntimeBrokerWaitOptions {
             smart_context,
             ready_timeout,
+            upstream_transport_identity: &runtime_config.upstream_transport_identity,
         },
     )? {
         activate_runtime_broker_profile(
@@ -389,6 +402,8 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
     }
 
     if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)?
+        && existing.upstream_transport_identity.as_deref()
+            == Some(&runtime_config.upstream_transport_identity)
         && !discard_stale_runtime_broker_registry(paths, &broker_key, &existing)
     {
         let health = probe_runtime_broker_health(&broker_client, paths, &broker_key, &existing)?;
@@ -439,6 +454,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
             include_code_review,
             upstream_no_proxy,
             smart_context,
+            &runtime_config.upstream_transport_identity,
         )?
     {
         activate_runtime_broker_profile(

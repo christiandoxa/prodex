@@ -50,6 +50,9 @@ pub struct RuntimeBrokerRegistry {
     pub include_code_review: bool,
     #[serde(default)]
     pub upstream_no_proxy: bool,
+    /// Opaque upstream proxy/trust context; never contains proxy credentials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_transport_identity: Option<String>,
     #[serde(default)]
     pub smart_context_enabled: bool,
     pub current_profile: String,

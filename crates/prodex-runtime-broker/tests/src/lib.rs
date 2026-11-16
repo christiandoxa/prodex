@@ -16,6 +16,7 @@ fn test_registry() -> RuntimeBrokerRegistry {
         upstream_base_url: "https://upstream.example".to_string(),
         include_code_review: true,
         upstream_no_proxy: false,
+        upstream_transport_identity: None,
         smart_context_enabled: false,
         current_profile: "work".to_string(),
         instance_id: "broker-token".to_string(),

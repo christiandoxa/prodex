@@ -429,6 +429,7 @@ mod tests {
             upstream_base_url: "https://upstream.example".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
+            upstream_transport_identity: None,
             smart_context_enabled: false,
             current_profile: "main".to_string(),
             instance_id: instance_id.to_string(),

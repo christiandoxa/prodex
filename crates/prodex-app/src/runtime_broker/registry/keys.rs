@@ -32,6 +32,7 @@ pub(crate) fn runtime_broker_key_with_smart_context(
     upstream_no_proxy: bool,
     smart_context_enabled: bool,
     model_context_window_tokens: Option<u64>,
+    upstream_transport_identity: &str,
 ) -> String {
     runtime_broker_key_for_binary_identity_with_smart_context(
         upstream_base_url,
@@ -39,7 +40,10 @@ pub(crate) fn runtime_broker_key_with_smart_context(
         upstream_no_proxy,
         smart_context_enabled,
         model_context_window_tokens,
-        &runtime_broker_current_binary_identity_key(),
+        &format!(
+            "{};transport={upstream_transport_identity}",
+            runtime_broker_current_binary_identity_key()
+        ),
     )
 }
 

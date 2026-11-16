@@ -189,6 +189,7 @@ pub(crate) fn runtime_broker_publish_start(
         upstream_base_url: bootstrap.upstream_base_url.clone(),
         include_code_review: bootstrap.include_code_review,
         upstream_no_proxy: bootstrap.upstream_no_proxy,
+        upstream_transport_identity: Some(proxy.runtime_config.upstream_transport_identity.clone()),
         smart_context_enabled: bootstrap.smart_context_enabled,
         current_profile: bootstrap.current_profile.clone(),
         instance_id: bootstrap.instance_id.clone(),

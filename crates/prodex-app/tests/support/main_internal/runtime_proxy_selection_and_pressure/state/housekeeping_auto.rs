@@ -73,6 +73,7 @@ fn auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
+            upstream_transport_identity: None,
             smart_context_enabled: false,
             current_profile: "main".to_string(),
             instance_id: "stale-instance".to_string(),

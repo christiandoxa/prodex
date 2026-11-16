@@ -125,6 +125,7 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        upstream_transport_identity: Some(crate::runtime_config::RuntimeConfig::compatibility_current().upstream_transport_identity),
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "instance".to_string(),
@@ -166,6 +167,7 @@ fn runtime_broker_realtime_endpoint_requires_loopback_and_preserves_mount() {
         upstream_base_url: "https://upstream.example".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        upstream_transport_identity: Some(crate::runtime_config::RuntimeConfig::compatibility_current().upstream_transport_identity),
         smart_context_enabled: false,
         current_profile: "work".to_string(),
         instance_id: "instance".to_string(),
@@ -220,6 +222,7 @@ fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version(
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        upstream_transport_identity: Some(crate::runtime_config::RuntimeConfig::compatibility_current().upstream_transport_identity),
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "instance".to_string(),
@@ -382,6 +385,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        upstream_transport_identity: Some(crate::runtime_config::RuntimeConfig::compatibility_current().upstream_transport_identity),
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "instance".to_string(),
@@ -487,6 +491,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        upstream_transport_identity: Some(crate::runtime_config::RuntimeConfig::compatibility_current().upstream_transport_identity),
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "instance".to_string(),
@@ -585,6 +590,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        upstream_transport_identity: Some(crate::runtime_config::RuntimeConfig::compatibility_current().upstream_transport_identity),
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "legacy-instance".to_string(),
@@ -597,6 +603,22 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
     save_runtime_broker_registry(&paths, "legacy-key", &registry)
         .expect("legacy broker registry should save");
     save_runtime_broker_test_capability(&paths, "legacy-key", "legacy-instance", "secret");
+
+    // A live broker with an unknown or different outbound policy must not be
+    // reused or signalled. Its current sessions may still depend on that policy.
+    let client = runtime_broker_client().expect("broker client should build");
+    for identity in [None, Some("different-transport-fixture".to_owned())] {
+        let mut different = registry.clone();
+        different.upstream_transport_identity = identity;
+        save_runtime_broker_registry(&paths, "legacy-key", &different).unwrap();
+        assert!(find_compatible_runtime_broker_registry(
+            &client, &paths, "current-key", &registry.upstream_base_url, false, false,
+        ).unwrap().is_none());
+        assert!(runtime_process_pid_alive(child.id()));
+        assert!(load_runtime_broker_registry(&paths, "legacy-key").unwrap().is_some());
+        assert!(server.try_recv().unwrap().is_none(), "mismatched transport must not be probed");
+    }
+    save_runtime_broker_registry(&paths, "legacy-key", &registry).unwrap();
 
     let health_thread = thread::spawn(move || {
         let request = server.recv().expect("health request should arrive");
@@ -683,6 +705,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        upstream_transport_identity: Some(crate::runtime_config::RuntimeConfig::compatibility_current().upstream_transport_identity),
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "instance".to_string(),
@@ -755,6 +778,7 @@ fn runtime_broker_registry_identity_is_exact_for_reads_and_removal() {
         upstream_base_url: "https://upstream.example".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        upstream_transport_identity: Some(crate::runtime_config::RuntimeConfig::compatibility_current().upstream_transport_identity),
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "Case-Sensitive-instance".to_string(),

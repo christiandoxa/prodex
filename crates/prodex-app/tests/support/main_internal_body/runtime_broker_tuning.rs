@@ -235,6 +235,7 @@ fn runtime_broker_version_replacement_defers_while_child_lease_is_live() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        upstream_transport_identity: None,
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "old-instance".to_string(),

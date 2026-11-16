@@ -40,6 +40,7 @@ fn runtime_proxy_broker_live_log_snapshot_is_authenticated_and_bounded() {
                 false,
                 false,
                 None,
+                &proxy.runtime_config.upstream_transport_identity,
             ),
             listen_addr: proxy.listen_addr.to_string(),
             started_at: Local::now().timestamp(),
