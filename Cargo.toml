@@ -131,7 +131,7 @@ redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", ve
 reqwest = { version = "0.13.5", default-features = false }
 rpassword = "7.5.4"
 crossterm = "0.29.0"
-rusqlite = { version = "0.41.1", features = ["bundled"] }
+rusqlite = { version = "0.42.0", features = ["bundled"] }
 postgres = "0.19.14"
 redis = { version = "1.8.1", default-features = false }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "std"] }
