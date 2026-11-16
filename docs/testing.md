@@ -823,3 +823,28 @@ production build profiles, and native smoke checks remain mandatory. The host
 migration explicitly preserves macOS 10.12 (Intel) and 11.0 (Apple Silicon)
 deployment floors. Final Mach-O load commands are checked before scanning and
 publication; a raised floor, wrong CPU, or missing deployment command fails closed.
+
+## Outbound proxy and goal-context regressions
+
+Native upstream transport honors proxy environment variables and `NO_PROXY`; local
+control sockets are independent of that outbound policy. HTTP CONNECT, HTTPS proxy,
+SOCKS5 (local DNS), and SOCKS5h (proxy DNS) are qualified independently. Proxy failures
+must not cause a direct-network bypass. Certificate verification remains enabled;
+`CODEX_CA_CERTIFICATE` takes precedence over `SSL_CERT_FILE`. Broker reuse requires
+matching proxy/trust context, without storing proxy credentials in registry metadata.
+
+Focused checks are `cargo test --locked -p prodex-app --lib proxy_config -- --test-threads=1`,
+`cargo test --locked -p prodex-app --lib runtime_broker -- --test-threads=1`, and
+`cargo test --locked -p prodex-app --lib local_resume -- --test-threads=1`.
+Use isolated loopback proxy servers and synthetic credentials for native fresh-turn,
+UUID, `prodex resume`, and `/resume` acceptance. Verify a changed proxy is used without
+terminating existing sessions or changing their UUIDs; include custom-CA and rejected
+proxy/TLS cases, and test the downloaded release binary rather than only a local build.
+
+Native `goal_objective` records are untrusted context, not tool results requiring an
+assistant call. The compiled bridge preserves that distinction. Test both missing and
+record-only IDs, real tool replies, Unicode, explicit null owners, and bounded malformed
+metadata using `cargo test --locked -p prodex-provider-core --lib untrusted_context`.
+A full local goal transcript must not pull in cached assistant history; a genuine
+output-only continuation must still recover its owning call. Neither test may change
+opaque/cloud continuation ownership or promote goal text into system instructions.
