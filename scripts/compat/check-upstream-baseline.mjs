@@ -7,6 +7,7 @@ import { repoRoot } from "../npm/common.mjs";
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
 
 const REQUIRED_CRITICAL_FILES = [
+  "codex-rs/model-provider/src/amazon_bedrock/mod.rs",
   "codex-rs/core/tests/suite/compact_remote.rs",
   "codex-rs/core/tests/suite/gcp.rs",
   "codex-rs/core/tests/suite/scenarios_incremental_tools.rs",
@@ -114,6 +115,14 @@ const REQUIRED_CRITICAL_FILES = [
 ];
 
 const REQUIRED_FILE_CONTAINS = {
+  "codex-rs/model-provider/src/amazon_bedrock/mod.rs": [
+    "fn normalize_completed_output_item(&self, item: &mut ResponseItem)",
+    "self.endpoint == BedrockEndpoint::Mantle",
+    "phase: Some(MessagePhase::Commentary)",
+    "&& role == \"assistant\"",
+    "annotations.as_ref().is_some_and(Vec::is_empty)",
+    "*annotations = None;",
+  ],
   "codex-rs/core/tests/suite/compact_remote.rs": [
     "provider_automatic_compaction_uses_v2_responses_endpoint",
     ".enable(Feature::IncrementalToolsLegacyGcp)",
@@ -168,6 +177,9 @@ const REQUIRED_FILE_CONTAINS = {
     ".mut_subcommands(localize_config_arg)"
   ],
   "codex-rs/core/src/client.rs": [
+    "Ok(ResponseEvent::OutputItemDone(mut item)) => {",
+    "provider.normalize_completed_output_item(&mut item);",
+
     "build_responses_headers",
     "build_responses_compatibility_headers",
     "build_ws_client_metadata",
@@ -338,6 +350,15 @@ const REQUIRED_FILE_CONTAINS = {
     "has_stable_account",
   ],
   "codex-rs/models-manager/models.json": [
+    "\"slug\": \"gpt-6.2-astra\"",
+    "\"slug\": \"gpt-6.2-sol\"",
+    "\"context_window\": 500000",
+    "\"context_window\": 272000",
+    "\"max_context_window\": 872000",
+    "\"default_reasoning_level\": \"low\"",
+    "\"effort\": \"ultra\"",
+    "\"supports_reasoning_effort_updates\": true",
+
     "\"slug\": \"gpt-6.1-terra\"",
     "\"display_name\": \"GPT-6.1 Terra\"",
     "\"slug\": \"gpt-6.1-sol\"",
@@ -667,7 +688,7 @@ const REQUIRED_FILE_CONTAINS = {
   ],
   "codex-rs/features/src/lib.rs": [
     "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-    "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: false,",
+    "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
@@ -1372,6 +1393,44 @@ const COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS = 2;
 
 const REQUIRED_SEMANTIC_CHECKS = [
   {
+    "id": "responses.provider-output-normalization",
+    "kind": "provider_capabilities",
+    "file": "codex-rs/core/src/client.rs",
+    "file_contains_all": [
+      "Ok(ResponseEvent::OutputItemDone(mut item)) => {",
+      "provider.normalize_completed_output_item(&mut item);"
+    ]
+  },
+  {
+    "id": "bedrock.mantle-commentary-replay",
+    "kind": "provider_capabilities",
+    "file": "codex-rs/model-provider/src/amazon_bedrock/mod.rs",
+    "file_contains_all": [
+      "fn normalize_completed_output_item(&self, item: &mut ResponseItem)",
+      "self.endpoint == BedrockEndpoint::Mantle",
+      "phase: Some(MessagePhase::Commentary)",
+      "&& role == \"assistant\"",
+      "annotations.as_ref().is_some_and(Vec::is_empty)",
+      "*annotations = None;"
+    ]
+  },
+  {
+    "id": "models.gpt62-native-contract",
+    "kind": "model_metadata",
+    "file": "codex-rs/models-manager/models.json",
+    "file_contains_all": [
+      "\"slug\": \"gpt-6.2-astra\"",
+      "\"slug\": \"gpt-6.2-sol\"",
+      "\"context_window\": 500000",
+      "\"context_window\": 272000",
+      "\"max_context_window\": 872000",
+      "\"default_reasoning_level\": \"low\"",
+      "\"effort\": \"ultra\"",
+      "\"supports_reasoning_effort_updates\": true"
+    ]
+  },
+
+  {
     "id": "gcp.incremental-remote-compaction",
     "kind": "request_context",
     "file": "codex-rs/core/tests/suite/compact_remote.rs",
@@ -1462,7 +1521,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     "file": "codex-rs/features/src/lib.rs",
     "file_contains_all": [
       "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-      "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: false,"
+      "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: true,"
     ]
   },
   {

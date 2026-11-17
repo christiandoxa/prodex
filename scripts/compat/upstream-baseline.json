@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.169.0 release",
+      "baseline_source": "openai/codex rust-v0.169.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -74,7 +74,9 @@
             "self.websocket_session.auth_owner != auth_owner",
             "!owner.is_current()",
             "self.turn_state = Arc::new(OnceLock::new());",
-            "prompt_cache_options_changed"
+            "prompt_cache_options_changed",
+            "Ok(ResponseEvent::OutputItemDone(mut item)) => {",
+            "provider.normalize_completed_output_item(&mut item);"
           ]
         },
         {
@@ -174,7 +176,7 @@
         },
         {
           "path": "codex-rs/models-manager/models.json",
-          "reason": "Owns bundled GPT-5.6 plus GPT-6/GPT-6.1 model metadata and context-window contracts. Codex 0.159.1 adds GPT-6.1 Sol as the default bundled model; Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
+          "reason": "GPT-6.2 native model metadata retains low default effort, ultra delegation, Responses Lite and model-specific context windows without API-maximum launch overrides.",
           "required_contains": [
             "\"display_name\": \"GPT-6-Luna\"",
             "\"display_name\": \"GPT-6.1-Sol\"",
@@ -192,7 +194,12 @@
             "\"effort\": \"max\"",
             "\"effort\": \"ultra\"",
             "\"slug\": \"gpt-6.1-terra\"",
-            "\"display_name\": \"GPT-6.1 Terra\""
+            "\"display_name\": \"GPT-6.1 Terra\"",
+            "\"slug\": \"gpt-6.2-astra\"",
+            "\"slug\": \"gpt-6.2-sol\"",
+            "\"context_window\": 500000",
+            "\"default_reasoning_level\": \"low\"",
+            "\"supports_reasoning_effort_updates\": true"
           ]
         },
         {
@@ -542,7 +549,7 @@
             "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
             "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: false,",
+            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,"
           ]
         },
@@ -1026,7 +1033,7 @@
         },
         {
           "path": "codex-rs/core/src/session/environment.rs",
-          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner’s first configuration or failure without overwriting a child configuration that already won.",
+          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner\u2019s first configuration or failure without overwriting a child configuration that already won.",
           "required_contains": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -1602,6 +1609,18 @@
             "let current = self.mcp_startup_status.as_ref()?",
             "let first = starting.first()?",
             "self.finish_mcp_startup();"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/amazon_bedrock/mod.rs",
+          "reason": "Only Mantle assistant commentary omits empty annotations to keep the original replay prefix stable. Other providers and nonempty annotations are unchanged.",
+          "required_contains": [
+            "fn normalize_completed_output_item(&self, item: &mut ResponseItem)",
+            "self.endpoint == BedrockEndpoint::Mantle",
+            "phase: Some(MessagePhase::Commentary)",
+            "&& role == \"assistant\"",
+            "annotations.as_ref().is_some_and(Vec::is_empty)",
+            "*annotations = None;"
           ]
         }
       ],
@@ -2680,7 +2699,7 @@
           "id": "core.subagent-pending-environment-inheritance",
           "kind": "environment_inheritance",
           "file": "codex-rs/core/src/session/environment.rs",
-          "reason": "Pending subagent environments must inherit the owner’s first ready/failure result without overwriting a child winner.",
+          "reason": "Pending subagent environments must inherit the owner\u2019s first ready/failure result without overwriting a child winner.",
           "file_contains_all": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -3503,7 +3522,7 @@
           "reason": "Responses Lite and Vertex are independently enabled by default. Stable Bedrock legacy remains disabled; GCP opt-out does not toggle Bedrock.",
           "file_contains_all": [
             "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: false,",
+            "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,"
           ]
         },
@@ -3743,9 +3762,49 @@
             "tokio::time::sleep_until(retry_at).await",
             "Err(e) => return Err(e)"
           ]
+        },
+        {
+          "id": "responses.provider-output-normalization",
+          "kind": "provider_capabilities",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Completed provider output is normalized before native item IDs and replay persistence. Prodex preserves the resulting item bytes.",
+          "file_contains_all": [
+            "Ok(ResponseEvent::OutputItemDone(mut item)) => {",
+            "provider.normalize_completed_output_item(&mut item);"
+          ]
+        },
+        {
+          "id": "bedrock.mantle-commentary-replay",
+          "kind": "provider_capabilities",
+          "file": "codex-rs/model-provider/src/amazon_bedrock/mod.rs",
+          "reason": "Only Mantle assistant commentary omits empty annotations to keep the original replay prefix stable. Other providers and nonempty annotations are unchanged.",
+          "file_contains_all": [
+            "fn normalize_completed_output_item(&self, item: &mut ResponseItem)",
+            "self.endpoint == BedrockEndpoint::Mantle",
+            "phase: Some(MessagePhase::Commentary)",
+            "&& role == \"assistant\"",
+            "annotations.as_ref().is_some_and(Vec::is_empty)",
+            "*annotations = None;"
+          ]
+        },
+        {
+          "id": "models.gpt62-native-contract",
+          "kind": "model_metadata",
+          "file": "codex-rs/models-manager/models.json",
+          "reason": "GPT-6.2 native model metadata retains low default effort, ultra delegation, Responses Lite and model-specific context windows without API-maximum launch overrides.",
+          "file_contains_all": [
+            "\"slug\": \"gpt-6.2-astra\"",
+            "\"slug\": \"gpt-6.2-sol\"",
+            "\"context_window\": 500000",
+            "\"context_window\": 272000",
+            "\"max_context_window\": 872000",
+            "\"default_reasoning_level\": \"low\"",
+            "\"effort\": \"ultra\"",
+            "\"supports_reasoning_effort_updates\": true"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.169.0",
+      "tested_codex_release": "rust-v0.169.1",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -4225,12 +4284,22 @@
             "codex": "b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b"
           },
           "summary": "Qualifies credential-source-bound runtime auth, per-request WebSocket reauthentication, bounded 1 MiB request frames, terminal policy/auth denials, explicit noninteractive project trust, saved-provider resume precedence, authoritative MCP startup events, and incremental Code Mode definitions. Security-notice fetching moves to app-server without relaxing identity/redirect checks. Prompt-cache TTL and additive moderation/file-audio schema fields remain native-owned; no opt-in feature is forced on."
+        },
+        {
+          "from": "rust-v0.169.0",
+          "to": "rust-v0.169.1",
+          "source_commit": "c376cf7396eff83ce4c6ac61b9553df142e7a0be",
+          "native_linux_package_sha256": "654cc52d98f2b90522a51858b8a8f65bab4147c61a34c0238e6b67655ec21e1b",
+          "native_linux_asset_sha256": {
+            "codex": "105102da93472e8641b839554c7713849817943a09f76db3f4ea333fd67ce8b5"
+          },
+          "summary": "Adds GPT-6.2 Sol and Astra with native low reasoning defaults, Responses Lite, model-specific context windows and ultra delegation. Bedrock legacy incremental tools are now default-on. Mantle normalizes only empty assistant-commentary annotations before replay; native provider routing and user configuration remain authoritative."
         }
       ],
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
-        "schema_hash_note": "The selected stable v2 lifecycle hashes come from the official Codex 0.169.0 binary. Nine schema changes add optional moderation metadata, an inference-hook error variant, and file-backed audio alternatives. Required lifecycle methods remain validated, including experimental queue and MCP RPCs with --experimental-schemas.",
+        "schema_hash_note": "The selected stable v2 lifecycle hashes were revalidated against the official Codex 0.169.1 binary and are unchanged from 0.169.0. Required lifecycle methods remain validated, including experimental queue and MCP RPCs with --experimental-schemas.",
         "required_methods": [
           "initialize",
           "initialized",
@@ -4262,19 +4331,15 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.169.0",
-      "name": "0.169.0",
-      "published_at": "2026-11-13T08:37:05Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.169.0",
+      "tag_name": "rust-v0.169.1",
+      "name": "0.169.1",
+      "published_at": "2026-11-17T22:21:10Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.169.1",
       "body_head": [
-        "## New Features",
-        "- The opt-in terminal workspace supports multiple side-chat tabs. Switch between them with the keyboard or mouse, and reopen saved local side chats after restarting Codex. (#59784, #60152, #60181)",
-        "- Search older tasks from the agent command center by name, prompt preview, or working directory. (#60286)",
-        "- Turn on **Collapse turn details** in the full-screen transcript to fold completed activity beneath each prompt while keeping answers visible and tool output searchable. (#60554, #60555, #60556, #60557)",
-        "- Add or edit custom model providers from the terminal. With custom gateway onboarding enabled, you can create a provider during sign-in and use a device code for supported gateways over SSH or without a local browser. (#59779, #60009, #60186, #60486, #60662)",
-        "- Press `Ctrl+S` in the terminal report editor to save a diagnostic ZIP locally, even when uploads are disabled. (#60542)",
-        "- With the opt-in Cloud connection on macOS and Linux, send images, choose a model and reasoning effort, and archive or restore Cloud conversations from the terminal. (#59828, #60061, #60635, #60651)",
-        "## Bug Fixes"
+        "## Chores",
+        "No verified release highlights available.",
+        "## Changelog",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.169.0...rust-v0.169.1"
       ]
     }
   },
