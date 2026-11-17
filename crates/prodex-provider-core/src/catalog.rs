@@ -352,6 +352,8 @@ mod tests {
         );
         assert_eq!(choices[0], ProviderModelChoice::ProviderDefault);
         for (index, model) in [
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
             "gpt-6-astra",
             "gpt-6.1-sol",
             "gpt-6.1-terra",
