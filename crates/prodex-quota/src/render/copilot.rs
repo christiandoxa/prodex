@@ -54,7 +54,7 @@ pub(super) fn copilot_reset_epoch(info: &CopilotQuotaInfo) -> Option<i64> {
             .ok()?;
     let datetime = date.and_hms_opt(0, 0, 0)?;
     Local
-        .from_local_datetime(&datetime)
+        .resolve_local_datetime(&datetime)
         .earliest()
         .map(|value| value.timestamp())
 }
