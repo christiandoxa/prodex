@@ -2,6 +2,80 @@
   {
     "provider": "openai",
     "owned_by": "openai",
+    "id": "gpt-6.2-astra",
+    "display_name": "GPT-6.2 Astra",
+    "description": "OpenAI GPT-6.2 flagship for complex coding and professional work. Text and image input; tool calling requires Responses. Native Codex context and effort settings remain authoritative.",
+    "context_window_tokens": 1050000,
+    "max_output_tokens": 128000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "default_reasoning_effort": "low",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "models",
+      "batches"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": true,
+      "vision": true,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "openai",
+    "owned_by": "openai",
+    "id": "gpt-6.2-sol",
+    "display_name": "GPT-6.2 Sol",
+    "description": "OpenAI GPT-6.2 model for everyday coding and agentic work. Text and image input; tool calling requires Responses. Native Codex context and effort settings remain authoritative.",
+    "context_window_tokens": 1050000,
+    "max_output_tokens": 128000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "default_reasoning_effort": "low",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "models",
+      "batches"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": true,
+      "vision": true,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "openai",
+    "owned_by": "openai",
     "id": "gpt-6-astra",
     "display_name": "GPT-6 Astra",
     "description": "OpenAI flagship model for the most demanding reasoning, coding, and agentic work.",

@@ -359,3 +359,57 @@ fn cca_originator_catalogs_do_not_pollute_cli_main_or_subagent_01650() {
         "missing default cache must not fall back into a CCA partition"
     );
 }
+
+#[test]
+fn gpt62_account_catalog_keeps_native_context_and_effort_authority() {
+    let fixture = Fixture::new("gpt62-efforts", chatgpt());
+    let cache = json!({"models":[{
+        "slug":"gpt-6.2-sol", "visibility":"list", "supported_in_api":true,
+        "context_window":500000, "max_context_window":872000,
+        "supported_reasoning_levels":[{"effort":"low"},{"effort":"max"},{"effort":"ultra"}],
+        "default_reasoning_level":"low"
+    }, {
+        "slug":"gpt-6.2-astra", "visibility":"list", "supported_in_api":true,
+        "context_window":272000, "max_context_window":872000,
+        "supported_reasoning_levels":[{"effort":"medium"},{"effort":"max"}],
+        "default_reasoning_level":"medium"
+    }]});
+    fs::write(fixture.home.join("models_cache.json"), cache.to_string()).unwrap();
+    let before = fs::read(fixture.home.join("models_cache.json")).unwrap();
+    let main = main_model_choices(ProviderId::OpenAi, None);
+    assert_eq!(ids(&main), ["gpt-6.2-sol", "gpt-6.2-astra"]);
+    for (id, default, selected) in [
+        (
+            "gpt-6.2-sol",
+            prodex_provider_core::ProviderReasoningEffort::Low,
+            "ultra",
+        ),
+        (
+            "gpt-6.2-astra",
+            prodex_provider_core::ProviderReasoningEffort::Medium,
+            "max",
+        ),
+    ] {
+        let resolved = crate::effective_provider_model_reasoning_resolution(
+            ProviderId::OpenAi,
+            Some(id),
+            Some(selected),
+        )
+        .unwrap();
+        assert_eq!(resolved.default_reasoning_effort, Some(default));
+        let sub = crate::effective_sub_agent_efforts(ProviderId::OpenAi, Some(id));
+        assert!(sub.iter().any(|effort| effort.as_str() == selected));
+    }
+    assert_eq!(
+        crate::effective_provider_model_reasoning_resolution(
+            ProviderId::OpenAi,
+            Some("gpt-6.2-astra"),
+            Some("ultra")
+        ),
+        Err(prodex_provider_core::ProviderModelReasoningError::UnsupportedEffort)
+    );
+    assert_eq!(
+        fs::read(fixture.home.join("models_cache.json")).unwrap(),
+        before
+    );
+}

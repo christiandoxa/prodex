@@ -452,7 +452,14 @@ fn openai_models_cache_supplies_sub_agent_choices_without_network() {
             "gpt-5.6-sol".to_string()
         ))
     );
-    for model in ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-sol"] {
+    for model in [
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+        "gpt-6.2-astra",
+        "gpt-6.2-sol",
+        "gpt-6-luna",
+        "gpt-6-sol",
+    ] {
         assert!(
             !choices.contains(&prodex_provider_core::ProviderModelChoice::Model(
                 model.into()

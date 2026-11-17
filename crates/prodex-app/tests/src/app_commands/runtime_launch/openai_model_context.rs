@@ -4,7 +4,14 @@ use super::*;
 fn runtime_launch_keeps_upstream_context_defaults_without_cache() {
     let root = temp_dir("openai-context-passthrough-no-cache");
     fs::create_dir_all(&root).unwrap();
-    for model in ["gpt-5.3-codex", "gpt-6.1-sol", "gpt-6-luna", "future-model"] {
+    for model in [
+        "gpt-5.3-codex",
+        "gpt-6.1-sol",
+        "gpt-6.2-astra",
+        "gpt-6.2-sol",
+        "gpt-6-luna",
+        "future-model",
+    ] {
         let original = [OsString::from("--model"), OsString::from(model)];
         let result = runtime_launch_openai_model_context_codex_args(&root, &original).unwrap();
         assert_eq!(

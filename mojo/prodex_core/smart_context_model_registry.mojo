@@ -257,6 +257,12 @@ def prodex_smart_context_model_prefix_scan_v1(
 
 
 def model_registry_context_window(view: ProdexRichStringView) -> Int64:
+    # Conservative native defaults, not the larger API or opt-in maximum.
+    # Explicit launch context still takes precedence in the caller.
+    if model_registry_equals["gpt-6.2-astra"](view):
+        return 272_000
+    if model_registry_equals["gpt-6.2-sol"](view):
+        return 500_000
     if model_registry_equals["unsloth/qwen3.5-35b-a3b"](view):
         return 16_384
     if (

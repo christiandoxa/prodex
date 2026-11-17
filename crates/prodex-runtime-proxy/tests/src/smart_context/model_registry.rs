@@ -86,3 +86,17 @@ fn model_registry_leaves_unknown_or_invalid_models_unresolved() {
     );
     assert_eq!(smart_context_model_context_window(None), None);
 }
+
+#[test]
+fn gpt62_registry_uses_conservative_native_context_defaults() {
+    for (model, tokens) in [("gpt-6.2-astra", 272_000), (" GPT-6.2-SOL ", 500_000)] {
+        assert_eq!(
+            smart_context_model_context_window(Some(model)).map(|window| window.tokens),
+            Some(tokens)
+        );
+    }
+    assert_eq!(
+        smart_context_model_context_window(Some("local-gpt-6.2-sol")),
+        None
+    );
+}

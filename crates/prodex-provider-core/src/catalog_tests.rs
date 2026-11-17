@@ -71,10 +71,10 @@ fn model_choices_keep_order_and_deduplicate_aliases_and_unicode_custom_ids() {
     assert_eq!(choices.first(), Some(&ProviderModelChoice::ProviderDefault));
     assert_eq!(
         choices[1],
-        ProviderModelChoice::Model("gpt-6-astra".to_string())
+        ProviderModelChoice::Model("gpt-6.2-astra".to_string())
     );
     assert_eq!(
-        choices[4],
+        choices[6],
         ProviderModelChoice::Model("gpt-6-luna".to_string())
     );
     assert!(choices.contains(&ProviderModelChoice::Model("gpt-5.6-sol".to_string())));
@@ -122,7 +122,12 @@ fn reasoning_resolves_long_unicode_model_ids_and_rejects_unicode_effort() {
     let resolution =
         provider_model_reasoning_resolution(ProviderId::OpenAi, Some(&query), Some("MAX")).unwrap();
 
-    assert_eq!(resolution.model_index, Some(7));
+    assert_eq!(
+        resolution.model_index,
+        provider_catalog_entries_for(ProviderId::OpenAi)
+            .iter()
+            .position(|entry| entry.id == "gpt-5.6-luna")
+    );
     assert_eq!(
         resolution.default_reasoning_effort,
         Some(ProviderReasoningEffort::Medium)
@@ -349,4 +354,70 @@ fn refreshed_agent_models_are_selectable_with_provider_scoped_metadata_04394() {
     );
     assert!(provider_catalog_entry(ProviderId::Kiro, "gpt-6.1-terra").is_none());
     assert!(provider_catalog_entry(ProviderId::Local, "gpt-6.1-terra").is_none());
+}
+
+#[test]
+fn gpt62_catalog_preserves_native_ids_and_reasoning_contract() {
+    for id in ["gpt-6.2-astra", "gpt-6.2-sol"] {
+        let entry = provider_catalog_entry(ProviderId::OpenAi, id)
+            .expect("GPT-6.2 must be present in the OpenAI catalog");
+        assert_eq!(entry.id, id);
+        assert_eq!(entry.context_window_tokens, Some(1_050_000));
+        assert_eq!(entry.max_output_tokens, Some(128_000));
+        assert!(entry.feature_flags.vision && entry.feature_flags.tools);
+        assert!(!entry.feature_flags.audio);
+        assert!(
+            !entry.pricing_known,
+            "flat pricing cannot encode context/tier rates"
+        );
+        let default =
+            provider_model_reasoning_resolution(ProviderId::OpenAi, Some(id), None).unwrap();
+        assert_eq!(
+            default.default_reasoning_effort,
+            Some(ProviderReasoningEffort::Low)
+        );
+        for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+            assert!(
+                provider_model_reasoning_resolution(ProviderId::OpenAi, Some(id), Some(effort))
+                    .is_ok()
+            );
+        }
+        for effort in ["none", "minimal"] {
+            assert_eq!(
+                provider_model_reasoning_resolution(ProviderId::OpenAi, Some(id), Some(effort)),
+                Err(ProviderModelReasoningError::UnsupportedEffort)
+            );
+        }
+        let choices =
+            resolve_provider_model_choices(ProviderId::OpenAi, &[id.to_uppercase()], Some(id));
+        assert_eq!(
+            choices
+                .iter()
+                .filter(|c| **c == ProviderModelChoice::Model(id.into()))
+                .count(),
+            1
+        );
+        let models = provider_model_catalog_json(ProviderId::OpenAi);
+        assert_eq!(models.iter().filter(|model| model["id"] == id).count(), 1);
+        for provider in [ProviderId::Copilot, ProviderId::Kiro, ProviderId::Local] {
+            assert!(
+                provider_catalog_entry(provider, id).is_none(),
+                "do not invent provider entitlements"
+            );
+        }
+    }
+    // Updating the catalog must not silently retarget established aliases or exact IDs.
+    for (query, expected) in [
+        ("astra", "gpt-6-astra"),
+        ("sol", "gpt-6.1-sol"),
+        ("gpt-6-astra", "gpt-6-astra"),
+        ("gpt-6.1-sol", "gpt-6.1-sol"),
+    ] {
+        assert_eq!(
+            provider_catalog_entry(ProviderId::OpenAi, query)
+                .unwrap()
+                .id,
+            expected
+        );
+    }
 }
