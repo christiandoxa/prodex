@@ -364,12 +364,12 @@ fn cca_originator_catalogs_do_not_pollute_cli_main_or_subagent_01650() {
 fn gpt62_account_catalog_keeps_native_context_and_effort_authority() {
     let fixture = Fixture::new("gpt62-efforts", chatgpt());
     let cache = json!({"models":[{
-        "slug":"gpt-6.2-sol", "visibility":"list", "supported_in_api":true,
+        "slug":"gpt-6.2-sol", "visibility":"list", "supported_in_api":true, "priority":1,
         "context_window":500000, "max_context_window":872000,
         "supported_reasoning_levels":[{"effort":"low"},{"effort":"max"},{"effort":"ultra"}],
         "default_reasoning_level":"low"
     }, {
-        "slug":"gpt-6.2-astra", "visibility":"list", "supported_in_api":true,
+        "slug":"gpt-6.2-astra", "visibility":"list", "supported_in_api":true, "priority":2,
         "context_window":272000, "max_context_window":872000,
         "supported_reasoning_levels":[{"effort":"medium"},{"effort":"max"}],
         "default_reasoning_level":"medium"
