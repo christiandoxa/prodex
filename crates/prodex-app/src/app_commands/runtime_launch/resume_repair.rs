@@ -93,6 +93,13 @@ pub(crate) fn migrate_legacy_openai_sessions_for_launch(
     } else {
         &prepared.codex_home
     };
+    // An external/profileless home can now own persistent SQLite state too.
+    // Repair its verified overlay-only pointers before either direct UUID resume
+    // or a later /resume picker, without rewriting any rollout contents.
+    prodex_session_store::repair_stale_overlay_rollout_paths(root)?;
+    if let Some(id) = prodex_runtime_launch::codex_resume_session_id(codex_args) {
+        prodex_session_store::repair_stale_overlay_rollout_path_for_session(root, id)?;
+    }
     let mut target = explicit_path
         .filter(|path| path.starts_with(root))
         .map(Path::to_path_buf);
@@ -423,3 +430,7 @@ mod media_tests;
 #[cfg(test)]
 #[path = "resume_root_tests.rs"]
 mod root_tests;
+
+#[cfg(test)]
+#[path = "resume_external_home_tests.rs"]
+mod external_home_tests;
