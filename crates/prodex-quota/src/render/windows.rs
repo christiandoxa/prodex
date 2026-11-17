@@ -151,15 +151,15 @@ pub fn quota_reset_at_from_message(message: &str) -> Option<i64> {
             let now = Local::now();
             let mut naive = now.date_naive().and_time(time);
             let mut parsed = Local
-                .from_local_datetime(&naive)
+                .resolve_local_datetime(&naive)
                 .single()
-                .or_else(|| Local.from_local_datetime(&naive).earliest())?;
+                .or_else(|| Local.resolve_local_datetime(&naive).earliest())?;
             if parsed.timestamp() <= now.timestamp() {
                 naive = naive.checked_add_signed(chrono::Duration::days(1))?;
                 parsed = Local
-                    .from_local_datetime(&naive)
+                    .resolve_local_datetime(&naive)
                     .single()
-                    .or_else(|| Local.from_local_datetime(&naive).earliest())?;
+                    .or_else(|| Local.resolve_local_datetime(&naive).earliest())?;
             }
             Some(parsed.timestamp())
         }
@@ -167,9 +167,9 @@ pub fn quota_reset_at_from_message(message: &str) -> Option<i64> {
             let naive =
                 chrono::NaiveDateTime::parse_from_str(&normalized, "%b %d, %Y %I:%M %p").ok()?;
             Local
-                .from_local_datetime(&naive)
+                .resolve_local_datetime(&naive)
                 .single()
-                .or_else(|| Local.from_local_datetime(&naive).earliest())
+                .or_else(|| Local.resolve_local_datetime(&naive).earliest())
                 .map(|datetime| datetime.timestamp())
         }
     }
