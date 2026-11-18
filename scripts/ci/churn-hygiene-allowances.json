@@ -1,5 +1,21 @@
 [
   {
+    "id": "audited-prodex-01700-codex-integration",
+    "requiredSubjects": [
+      "feat(compat): qualify Codex 0.170.0 source and lifecycle contracts",
+      "fix(proxy): preserve native HTTP fallback for oversized WebSocket requests",
+      "test(proxy): use native handshake callback contract in size fixtures",
+      "ci(compat): record audited Codex 0.170.0 integration"
+    ],
+    "caps": {
+      "maxFiles": 27,
+      "maxBehaviorFiles": 25,
+      "maxLines": 8510,
+      "maxFileLines": 1069
+    },
+    "reason": "Reviewed exact Codex 0.170.0 integration from Prodex 0.169.2: verified native source/package qualification, byte-exact generated lifecycle schemas, mandatory offline schema-digest validation, and the bounded WebSocket size fallback repair with native and deterministic regression evidence. Generated upstream fixtures account for 7200 changed lines. The runtime repair and callback fixture remain independently within ordinary per-commit thresholds and preserve HTTP proxy routing, continuation ownership and post-text recovery. Exact required subjects and measured caps cover this source push only; release metadata is pushed separately and every ordinary security, correctness, native-platform and publication gate remains required."
+  },
+  {
     "id": "audited-codex-01700-source-and-native-schemas",
     "requiredSubjects": [
       "feat(compat): qualify Codex 0.170.0 source and lifecycle contracts"
