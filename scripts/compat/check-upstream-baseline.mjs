@@ -5,8 +5,19 @@ import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
+const DEFAULT_SCHEMA_FIXTURE_PATH = path.join(
+  repoRoot,
+  "crates/prodex-app/tests/fixtures/compat_replay/upstream_codex_schema",
+);
 
 const REQUIRED_CRITICAL_FILES = [
+  "codex-rs/protocol/src/items/display.rs",
+  "codex-rs/codex-api/src/requests/headers.rs",
+  "codex-rs/rmcp-client/src/oauth.rs",
+  "codex-rs/codex-mcp/src/server_key.rs",
+  "codex-rs/core/src/session/model_ids.rs",
+  "codex-rs/history/src/model_id_ordinals.rs",
+  "codex-rs/history/src/rollout_payload.rs",
   "codex-rs/model-provider/src/amazon_bedrock/mod.rs",
   "codex-rs/core/tests/suite/compact_remote.rs",
   "codex-rs/core/tests/suite/gcp.rs",
@@ -115,6 +126,56 @@ const REQUIRED_CRITICAL_FILES = [
 ];
 
 const REQUIRED_FILE_CONTAINS = {
+  "codex-rs/protocol/src/items/display.rs": [
+    "pub struct AgentMessageDisplayVersion;",
+    "_ => Err(\"unsupported answer display version\")",
+    "#[serde(tag = \"mode\", rename_all = \"camelCase\")]",
+    "pub enum AgentMessageDisplay",
+    "moderated: stored.moderated || display.is_none(),"
+  ],
+  "codex-rs/codex-api/src/requests/headers.rs": [
+    "pub fn build_realtime_thread_headers(",
+    "let mut headers = build_session_headers(Some(session_id), Some(thread_id));",
+    "&& source.as_str().len() <= 256",
+    "headers.insert(\"x-codex-turn-metadata\", value);"
+  ],
+  "codex-rs/rmcp-client/src/oauth.rs": [
+    "pub(super) async fn acquire_persistence_guard(",
+    "let expected = self.stored_credentials().await;",
+    "if normalized_oauth_credentials(current.as_ref()) != expected {",
+    "return Err(AuthError::AuthorizationRequired);",
+    "pub(super) async fn persist_with_manager("
+  ],
+  "codex-rs/codex-mcp/src/server_key.rs": [
+    "pub struct McpServerKey",
+    "#[serde(rename = \"server_name\")]",
+    "scoped_environment_id: Option<String>",
+    "pub fn in_environment(environment: impl Into<String>, name: impl Into<String>) -> Self",
+    "scoped_environment_id: Some(environment.into())"
+  ],
+  "codex-rs/core/src/session/model_ids.rs": [
+    "pub(super) fn from_history(history: &InitialHistory) -> InitialModelIds",
+    "InitialHistory::Resumed(resumed)",
+    "checkpoint.window_id.as_ref()?.validated()",
+    "meta.meta.id == resumed.conversation_id",
+    "InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => None",
+    "resumed_window.unwrap_or_else(|| context_window_id_generator())"
+  ],
+  "codex-rs/history/src/model_id_ordinals.rs": [
+    "pub fn next_model_id_ordinals(records: &[RolloutItem]) -> (u64, u64)",
+    ".and_then(|m| m.next_item_ordinal)",
+    "item = item.max(next.checked_sub(1));",
+    "pub fn stamp_item_ordinals(mut next: u64, items: &mut [RolloutItem]) -> u64",
+    "next = next.max(next_model_id_ordinals(std::slice::from_ref(item)).0);",
+    "metadata.next_item_ordinal = Some(next);"
+  ],
+  "codex-rs/history/src/rollout_payload.rs": [
+    "id_allocation: Option<Cow<'a, ResponseItemIdAllocation>>",
+    "id_allocation: id.and_then(ResponseItemId::allocation).map(Cow::Borrowed)",
+    "item.set_id(Some(id.with_allocation(allocation.into_owned())));",
+    "retained_source: retained_source.clone(),",
+    "retained_source: metadata.retained_source.clone(),"
+  ],
   "codex-rs/model-provider/src/amazon_bedrock/mod.rs": [
     "fn normalize_completed_output_item(&self, item: &mut ResponseItem)",
     "self.endpoint == BedrockEndpoint::Mantle",
@@ -243,6 +304,9 @@ const REQUIRED_FILE_CONTAINS = {
     "!owner.is_current()",
     "self.turn_state = Arc::new(OnceLock::new());",
     "prompt_cache_options_changed",
+    "fn prepare_response_items_for_request(&self, input: &mut [ResponseItem])",
+    ".is_some_and(|id| id.allocation().is_none() && !id.is_prefixed())",
+    "item.set_id(/*new_id*/ None);",
   ],
   "codex-rs/core/src/compact_remote_v2.rs": [
     "run_remote_compact_task",
@@ -475,7 +539,7 @@ const REQUIRED_FILE_CONTAINS = {
   "codex-rs/core/src/realtime_conversation.rs": [
     "ConversationStartTransport::Websocket",
     "realtime_request_headers",
-    "build_session_headers",
+    "build_realtime_thread_headers",
     "RealtimeWsVersion::V1",
     "openai-alpha",
     "quicksilver=v1",
@@ -600,6 +664,14 @@ const REQUIRED_FILE_CONTAINS = {
     "Frame::message_fragment(payload, opcode, fragment)",
     "opcode = Data::Continue",
     "large_turn_is_one_text_message_in_bounded_frames",
+    ".get(X_CODEX_WEBSOCKET_MAX_MESSAGE_BYTES_HEADER)",
+    ".and_then(|value| value.parse::<usize>().ok());",
+    ".is_some_and(|limit| request_text.len() > limit)",
+    "let mut received_text = false;",
+    "received_text = true;",
+    "Message::Close(Some(frame)) if frame.code == CloseCode::Size && !received_text",
+    "return Err(ApiError::WebsocketMessageTooLarge);",
+    "x-codex-websocket-max-message-bytes",
   ],
   "codex-rs/core/src/context/base_instructions.rs": [
     "pub(crate) const KIND: &str = \"model.base_instructions\";",
@@ -705,6 +777,7 @@ const REQUIRED_FILE_CONTAINS = {
     "default_enabled: false",
     "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,",
+    "id: Feature::MultiEnvironmentMcp,\n        key: \"multi_environment_mcp\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,",
   ],
   "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs": [
     "McpServerEventStreamStartParams",
@@ -966,6 +1039,14 @@ const REQUIRED_FILE_CONTAINS = {
     "if typesafe_overrides.model_provider.is_none()",
     "overrides.contains_key(\"model_provider\")",
     "typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone())",
+    ".legacy_sandbox_policy_label(config_snapshot.cwd().as_path())",
+    "SandboxMode::ReadOnly => active_sandbox_label == \"read-only\"",
+    "SandboxMode::WorkspaceWrite => active_sandbox_label == \"workspace-write\"",
+    "\"danger-full-access\" | \"external-sandbox\"",
+    "&& !has_subscribers",
+    "&& matches!(loaded_status, ThreadStatus::Idle)",
+    "&& !existing_thread.has_active_turn().await",
+    "match wait_for_thread_shutdown(&existing_thread).await",
   ],
   "codex-rs/app-server/src/request_processors/turn_processor.rs": [
     "TurnRequestProcessor",
@@ -1065,6 +1146,10 @@ const REQUIRED_FILE_CONTAINS = {
     "no one will retry this child's one-time update",
     "!inherited || matches!(environment.config, EnvironmentConfigState::Pending)",
     "if inherited && matches!(environments, (None, None))",
+    "pub(super) fn apply_session_settings(",
+    "let mut updates = updates.clone();",
+    "file_system.preserve_deny_read_restrictions_from(&current_file_system);",
+    "FileSystemSandboxPolicy::from_legacy_sandbox_policy_preserving_deny_entries(",
   ],
   "codex-rs/core/src/agent/control/spawn.rs": [
     "start_options.reserved_thread_id = Some(child_thread_id);",
@@ -1108,6 +1193,11 @@ const REQUIRED_FILE_CONTAINS = {
     "Reconnecting... waiting for network",
     "Duration::from_secs(60)",
     "tokio::time::sleep(retry_delay).await;",
+    "let requires_http_fallback = err.requires_http_fallback();",
+    "(requires_http_fallback || retry_state.retries >= max_retries)",
+    "tokio::time::sleep_until(retry_after.deadline()).await;",
+    "if switched || requires_http_fallback {",
+    "retry_state.retries = 0;",
   ],
   "codex-rs/codex-api/src/common.rs": [
     "pub struct ResponsesApiRequest",
@@ -1209,6 +1299,9 @@ const REQUIRED_FILE_CONTAINS = {
     "| CodexErrorDetails::AccessProgramNotEnabled(_)",
     "| CodexErrorDetails::InferenceHookDenied { .. }",
     "| CodexErrorDetails::ContentPolicyViolation { .. }",
+    "pub fn requires_http_fallback(&self) -> bool",
+    "matches!(self.retry_policy(), RetryPolicy::FallBackToHttp)",
+    "CodexErrorDetails::WebsocketMessageTooLarge => RetryPolicy::FallBackToHttp,",
   ],
   "codex-rs/rmcp-client/src/request_cancellation.rs": [
     "struct CancelOnDrop",
@@ -1392,6 +1485,179 @@ const REQUIRED_STREAM_EVENTS = [
 const COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS = 2;
 
 const REQUIRED_SEMANTIC_CHECKS = [
+  {
+    "id": "websocket.size-rejection-fallback",
+    "kind": "transport_fallback",
+    "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    "file_contains_all": [
+      ".get(X_CODEX_WEBSOCKET_MAX_MESSAGE_BYTES_HEADER)",
+      ".and_then(|value| value.parse::<usize>().ok());",
+      ".is_some_and(|limit| request_text.len() > limit)",
+      "let mut received_text = false;",
+      "received_text = true;",
+      "Message::Close(Some(frame)) if frame.code == CloseCode::Size && !received_text",
+      "return Err(ApiError::WebsocketMessageTooLarge);",
+      "x-codex-websocket-max-message-bytes",
+    ]
+  },
+  {
+    "id": "responses.immediate-http-fallback",
+    "kind": "transport_fallback",
+    "file": "codex-rs/core/src/responses_retry.rs",
+    "file_contains_all": [
+      "let requires_http_fallback = err.requires_http_fallback();",
+      "(requires_http_fallback || retry_state.retries >= max_retries)",
+      "tokio::time::sleep_until(retry_after.deadline()).await;",
+      "if switched || requires_http_fallback {",
+      "retry_state.retries = 0;"
+    ]
+  },
+  {
+    "id": "responses.http-fallback-error-classification",
+    "kind": "transport_fallback",
+    "file": "codex-rs/protocol/src/error.rs",
+    "file_contains_all": [
+      "pub fn requires_http_fallback(&self) -> bool",
+      "matches!(self.retry_policy(), RetryPolicy::FallBackToHttp)",
+      "CodexErrorDetails::WebsocketMessageTooLarge => RetryPolicy::FallBackToHttp,"
+    ]
+  },
+  {
+    "id": "responses.allocated-wire-id-preservation",
+    "kind": "request_context",
+    "file": "codex-rs/core/src/client.rs",
+    "file_contains_all": [
+      "fn prepare_response_items_for_request(&self, input: &mut [ResponseItem])",
+      ".is_some_and(|id| id.allocation().is_none() && !id.is_prefixed())",
+      "item.set_id(/*new_id*/ None);"
+    ]
+  },
+  {
+    "id": "history.rollout-allocation-preservation",
+    "kind": "session_persistence",
+    "file": "codex-rs/history/src/rollout_payload.rs",
+    "file_contains_all": [
+      "id_allocation: Option<Cow<'a, ResponseItemIdAllocation>>",
+      "id_allocation: id.and_then(ResponseItemId::allocation).map(Cow::Borrowed)",
+      "item.set_id(Some(id.with_allocation(allocation.into_owned())));",
+      "retained_source: retained_source.clone(),",
+      "retained_source: metadata.retained_source.clone(),"
+    ]
+  },
+  {
+    "id": "history.compaction-allocation-cursor",
+    "kind": "session_persistence",
+    "file": "codex-rs/history/src/model_id_ordinals.rs",
+    "file_contains_all": [
+      "pub fn next_model_id_ordinals(records: &[RolloutItem]) -> (u64, u64)",
+      ".and_then(|m| m.next_item_ordinal)",
+      "item = item.max(next.checked_sub(1));",
+      "pub fn stamp_item_ordinals(mut next: u64, items: &mut [RolloutItem]) -> u64",
+      "next = next.max(next_model_id_ordinals(std::slice::from_ref(item)).0);",
+      "metadata.next_item_ordinal = Some(next);"
+    ]
+  },
+  {
+    "id": "resume.persisted-model-window",
+    "kind": "session_persistence",
+    "file": "codex-rs/core/src/session/model_ids.rs",
+    "file_contains_all": [
+      "pub(super) fn from_history(history: &InitialHistory) -> InitialModelIds",
+      "InitialHistory::Resumed(resumed)",
+      "checkpoint.window_id.as_ref()?.validated()",
+      "meta.meta.id == resumed.conversation_id",
+      "InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => None",
+      "resumed_window.unwrap_or_else(|| context_window_id_generator())"
+    ]
+  },
+  {
+    "id": "resume.permission-profile-label",
+    "kind": "session_persistence",
+    "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+    "file_contains_all": [
+      ".legacy_sandbox_policy_label(config_snapshot.cwd().as_path())",
+      "SandboxMode::ReadOnly => active_sandbox_label == \"read-only\"",
+      "SandboxMode::WorkspaceWrite => active_sandbox_label == \"workspace-write\"",
+      "\"danger-full-access\" | \"external-sandbox\""
+    ]
+  },
+  {
+    "id": "resume.active-recovery-turn",
+    "kind": "session_persistence",
+    "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+    "file_contains_all": [
+      "&& !has_subscribers",
+      "&& matches!(loaded_status, ThreadStatus::Idle)",
+      "&& !existing_thread.has_active_turn().await",
+      "match wait_for_thread_shutdown(&existing_thread).await"
+    ]
+  },
+  {
+    "id": "permissions.admission-preserves-denials",
+    "kind": "permission_boundary",
+    "file": "codex-rs/core/src/session/environment.rs",
+    "file_contains_all": [
+      "pub(super) fn apply_session_settings(",
+      "let mut updates = updates.clone();",
+      "file_system.preserve_deny_read_restrictions_from(&current_file_system);",
+      "FileSystemSandboxPolicy::from_legacy_sandbox_policy_preserving_deny_entries("
+    ]
+  },
+  {
+    "id": "mcp.environment-registration-identity",
+    "kind": "mcp_identity",
+    "file": "codex-rs/codex-mcp/src/server_key.rs",
+    "file_contains_all": [
+      "pub struct McpServerKey",
+      "#[serde(rename = \"server_name\")]",
+      "scoped_environment_id: Option<String>",
+      "pub fn in_environment(environment: impl Into<String>, name: impl Into<String>) -> Self",
+      "scoped_environment_id: Some(environment.into())"
+    ]
+  },
+  {
+    "id": "features.multi-environment-mcp-opt-in",
+    "kind": "feature_gate",
+    "file": "codex-rs/features/src/lib.rs",
+    "file_contains_all": [
+      "id: Feature::MultiEnvironmentMcp,\n        key: \"multi_environment_mcp\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+    ]
+  },
+  {
+    "id": "mcp.oauth-stale-persistence-rejection",
+    "kind": "credential_boundary",
+    "file": "codex-rs/rmcp-client/src/oauth.rs",
+    "file_contains_all": [
+      "pub(super) async fn acquire_persistence_guard(",
+      "let expected = self.stored_credentials().await;",
+      "if normalized_oauth_credentials(current.as_ref()) != expected {",
+      "return Err(AuthError::AuthorizationRequired);",
+      "pub(super) async fn persist_with_manager("
+    ]
+  },
+  {
+    "id": "realtime.shared-thread-headers",
+    "kind": "request_context",
+    "file": "codex-rs/codex-api/src/requests/headers.rs",
+    "file_contains_all": [
+      "pub fn build_realtime_thread_headers(",
+      "let mut headers = build_session_headers(Some(session_id), Some(thread_id));",
+      "&& source.as_str().len() <= 256",
+      "headers.insert(\"x-codex-turn-metadata\", value);"
+    ]
+  },
+  {
+    "id": "app-server.versioned-answer-display",
+    "kind": "protocol_extensions",
+    "file": "codex-rs/protocol/src/items/display.rs",
+    "file_contains_all": [
+      "pub struct AgentMessageDisplayVersion;",
+      "_ => Err(\"unsupported answer display version\")",
+      "#[serde(tag = \"mode\", rename_all = \"camelCase\")]",
+      "pub enum AgentMessageDisplay",
+      "moderated: stored.moderated || display.is_none(),"
+    ]
+  },
   {
     "id": "responses.provider-output-normalization",
     "kind": "provider_capabilities",
@@ -1695,7 +1961,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file_contains_all: [
       "ConversationStartTransport::Websocket",
       "realtime_request_headers",
-      "build_session_headers",
+      "build_realtime_thread_headers",
       "RealtimeWsVersion::V1",
       "openai-alpha",
       "quicksilver=v1",
@@ -3714,11 +3980,11 @@ async function validateSourceMarkers({ compat, sourceRoot }) {
   return errors;
 }
 
-async function validateGeneratedSchemas({ protocol, stableRoot, experimentalRoot }) {
+async function validateGeneratedSchemas({ protocol, stableV2Root, experimentalRoot }) {
   const errors = [];
-  if (stableRoot) {
+  if (stableV2Root) {
     for (const name of STABLE_LIFECYCLE_SCHEMAS) {
-      const data = await fs.readFile(path.join(stableRoot, "v2", name));
+      const data = await fs.readFile(path.join(stableV2Root, name));
       if (createHash("sha256").update(data).digest("hex") !== protocol.stable_v2_sha256?.[name]) {
         errors.push(`generated stable v2 schema SHA-256 mismatch: ${name}`);
       }
@@ -3837,6 +4103,21 @@ function runSelfTest() {
 
   // Retained and newly qualified contracts must reject the loss of a source marker.
   for (const id of [
+    "websocket.size-rejection-fallback",
+    "responses.immediate-http-fallback",
+    "responses.http-fallback-error-classification",
+    "responses.allocated-wire-id-preservation",
+    "history.rollout-allocation-preservation",
+    "history.compaction-allocation-cursor",
+    "resume.persisted-model-window",
+    "resume.permission-profile-label",
+    "resume.active-recovery-turn",
+    "permissions.admission-preserves-denials",
+    "mcp.environment-registration-identity",
+    "features.multi-environment-mcp-opt-in",
+    "mcp.oauth-stale-persistence-rejection",
+    "realtime.shared-thread-headers",
+    "app-server.versioned-answer-display",
     "compact.native-error-retry-policy",
     "context.incremental-exec-catalog",
     "mcp.authoritative-startup-rounds",
@@ -4122,6 +4403,7 @@ async function main() {
         "Usage: node scripts/compat/check-upstream-baseline.mjs [--baseline <path>] [--source <dir>] [--schemas <dir>] [--experimental-schemas <dir>] [--report <path>] [--json] [--self-test]",
         "",
         "Offline guard for critical upstream Codex runtime assumptions recorded in scripts/compat/upstream-baseline.json.",
+        "Validates committed stable lifecycle schemas by default; --schemas selects generated native schemas.",
       ].join("\n") + "\n",
     );
     return;
@@ -4146,10 +4428,11 @@ async function main() {
       })),
     );
   }
-  if (args.schemas || args["experimental-schemas"]) {
+  const protocol = baseline?.codex?.compatibility?.app_server_protocol;
+  if (protocol && typeof protocol === "object" && !Array.isArray(protocol)) {
     errors.push(...await validateGeneratedSchemas({
-      protocol: baseline.codex.compatibility.app_server_protocol,
-      stableRoot: args.schemas,
+      protocol,
+      stableV2Root: args.schemas ? path.join(args.schemas, "v2") : DEFAULT_SCHEMA_FIXTURE_PATH,
       experimentalRoot: args["experimental-schemas"],
     }));
   }

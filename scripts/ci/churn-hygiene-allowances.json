@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-codex-01700-source-and-native-schemas",
+    "requiredSubjects": [
+      "feat(compat): qualify Codex 0.170.0 source and lifecycle contracts"
+    ],
+    "caps": {
+      "maxFiles": 15,
+      "maxBehaviorFiles": 15,
+      "maxLines": 7975,
+      "maxFileLines": 1069
+    },
+    "reason": "Reviewed exact Codex 0.170.0 qualification against source 29eb79e9866b3262a777fdf8195c1b9e63684c91 and official package SHA-256 e2f9a148c8623338400d282e233a7a82024b4bf73803c400c3faf7a8415ddcab. Eleven generated lifecycle fixtures account for 7200 changed lines and restore byte-for-byte agreement with all thirteen pinned native schemas; two interrupt schemas are identical. The existing offline guard now verifies those committed digests by default and a stale-digest regression fails before the fix and passes after it. Fifteen additional source contracts preserve transport fallback, history allocation, resume permissions, MCP identity and realtime metadata. Exact-subject and measured file/line caps cover this generated import and qualification only; global thresholds and all correctness, security and release gates remain enforced."
+  },
+  {
     "id": "audited-local-http-listener-pressure-repair-0438",
     "requiredSubjects": [
       "fix(runtime): keep local proxy listeners alive under descriptor pressure"

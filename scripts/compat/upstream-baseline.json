@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.169.1 release",
+      "baseline_source": "openai/codex rust-v0.170.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -76,7 +76,10 @@
             "self.turn_state = Arc::new(OnceLock::new());",
             "prompt_cache_options_changed",
             "Ok(ResponseEvent::OutputItemDone(mut item)) => {",
-            "provider.normalize_completed_output_item(&mut item);"
+            "provider.normalize_completed_output_item(&mut item);",
+            "fn prepare_response_items_for_request(&self, input: &mut [ResponseItem])",
+            ".is_some_and(|id| id.allocation().is_none() && !id.is_prefixed())",
+            "item.set_id(/*new_id*/ None);"
           ]
         },
         {
@@ -338,7 +341,7 @@
           "required_contains": [
             "ConversationStartTransport::Websocket",
             "realtime_request_headers",
-            "build_session_headers",
+            "build_realtime_thread_headers",
             "RealtimeWsVersion::V1",
             "openai-alpha",
             "quicksilver=v1"
@@ -490,7 +493,15 @@
             "const FRAGMENT_SIZE: usize = 1024 * 1024",
             "Frame::message_fragment(payload, opcode, fragment)",
             "opcode = Data::Continue",
-            "large_turn_is_one_text_message_in_bounded_frames"
+            "large_turn_is_one_text_message_in_bounded_frames",
+            ".get(X_CODEX_WEBSOCKET_MAX_MESSAGE_BYTES_HEADER)",
+            ".and_then(|value| value.parse::<usize>().ok());",
+            ".is_some_and(|limit| request_text.len() > limit)",
+            "let mut received_text = false;",
+            "received_text = true;",
+            "Message::Close(Some(frame)) if frame.code == CloseCode::Size && !received_text",
+            "return Err(ApiError::WebsocketMessageTooLarge);",
+            "x-codex-websocket-max-message-bytes"
           ]
         },
         {
@@ -550,7 +561,8 @@
             "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-            "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,"
+            "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+            "id: Feature::MultiEnvironmentMcp,\n        key: \"multi_environment_mcp\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
           ]
         },
         {
@@ -866,7 +878,15 @@
             "fn merge_persisted_resume_metadata",
             "if typesafe_overrides.model_provider.is_none()",
             "overrides.contains_key(\"model_provider\")",
-            "typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone())"
+            "typesafe_overrides.model_provider = Some(persisted_metadata.model_provider.clone())",
+            ".legacy_sandbox_policy_label(config_snapshot.cwd().as_path())",
+            "SandboxMode::ReadOnly => active_sandbox_label == \"read-only\"",
+            "SandboxMode::WorkspaceWrite => active_sandbox_label == \"workspace-write\"",
+            "\"danger-full-access\" | \"external-sandbox\"",
+            "&& !has_subscribers",
+            "&& matches!(loaded_status, ThreadStatus::Idle)",
+            "&& !existing_thread.has_active_turn().await",
+            "match wait_for_thread_shutdown(&existing_thread).await"
           ]
         },
         {
@@ -1033,14 +1053,18 @@
         },
         {
           "path": "codex-rs/core/src/session/environment.rs",
-          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner\u2019s first configuration or failure without overwriting a child configuration that already won.",
+          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner’s first configuration or failure without overwriting a child configuration that already won.",
           "required_contains": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
             "ConfigUpdateSource::Inherited",
             "no one will retry this child's one-time update",
             "!inherited || matches!(environment.config, EnvironmentConfigState::Pending)",
-            "if inherited && matches!(environments, (None, None))"
+            "if inherited && matches!(environments, (None, None))",
+            "pub(super) fn apply_session_settings(",
+            "let mut updates = updates.clone();",
+            "file_system.preserve_deny_read_restrictions_from(&current_file_system);",
+            "FileSystemSandboxPolicy::from_legacy_sandbox_policy_preserving_deny_entries("
           ]
         },
         {
@@ -1094,7 +1118,12 @@
             "CodexErrorDetails::ConnectionFailed(_)",
             "Reconnecting... waiting for network",
             "Duration::from_secs(60)",
-            "tokio::time::sleep(retry_delay).await;"
+            "tokio::time::sleep(retry_delay).await;",
+            "let requires_http_fallback = err.requires_http_fallback();",
+            "(requires_http_fallback || retry_state.retries >= max_retries)",
+            "tokio::time::sleep_until(retry_after.deadline()).await;",
+            "if switched || requires_http_fallback {",
+            "retry_state.retries = 0;"
           ]
         },
         {
@@ -1395,7 +1424,10 @@
             "| CodexErrorDetails::WorkspaceAccessDenied(_)",
             "| CodexErrorDetails::AccessProgramNotEnabled(_)",
             "| CodexErrorDetails::InferenceHookDenied { .. }",
-            "| CodexErrorDetails::ContentPolicyViolation { .. }"
+            "| CodexErrorDetails::ContentPolicyViolation { .. }",
+            "pub fn requires_http_fallback(&self) -> bool",
+            "matches!(self.retry_policy(), RetryPolicy::FallBackToHttp)",
+            "CodexErrorDetails::WebsocketMessageTooLarge => RetryPolicy::FallBackToHttp,"
           ]
         },
         {
@@ -1621,6 +1653,84 @@
             "&& role == \"assistant\"",
             "annotations.as_ref().is_some_and(Vec::is_empty)",
             "*annotations = None;"
+          ]
+        },
+        {
+          "path": "codex-rs/history/src/rollout_payload.rs",
+          "reason": "Native rollout serialization preserves optional allocation and retained-assistant revision metadata without changing Responses wire IDs.",
+          "required_contains": [
+            "id_allocation: Option<Cow<'a, ResponseItemIdAllocation>>",
+            "id_allocation: id.and_then(ResponseItemId::allocation).map(Cow::Borrowed)",
+            "item.set_id(Some(id.with_allocation(allocation.into_owned())));",
+            "retained_source: retained_source.clone(),",
+            "retained_source: metadata.retained_source.clone(),"
+          ]
+        },
+        {
+          "path": "codex-rs/history/src/model_id_ordinals.rs",
+          "reason": "Compaction and replay recover a nondecreasing allocation cursor from checkpoints, replacement history and retained sources, stamped in append order.",
+          "required_contains": [
+            "pub fn next_model_id_ordinals(records: &[RolloutItem]) -> (u64, u64)",
+            ".and_then(|m| m.next_item_ordinal)",
+            "item = item.max(next.checked_sub(1));",
+            "pub fn stamp_item_ordinals(mut next: u64, items: &mut [RolloutItem]) -> u64",
+            "next = next.max(next_model_id_ordinals(std::slice::from_ref(item)).0);",
+            "metadata.next_item_ordinal = Some(next);"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/session/model_ids.rs",
+          "reason": "Resume reuses its validated saved context window instead of allocating a provisional window; new and forked threads initialize independently.",
+          "required_contains": [
+            "pub(super) fn from_history(history: &InitialHistory) -> InitialModelIds",
+            "InitialHistory::Resumed(resumed)",
+            "checkpoint.window_id.as_ref()?.validated()",
+            "meta.meta.id == resumed.conversation_id",
+            "InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => None",
+            "resumed_window.unwrap_or_else(|| context_window_id_generator())"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-mcp/src/server_key.rs",
+          "reason": "Exact MCP registration identity includes optional environment scope, separate from display names and execution location.",
+          "required_contains": [
+            "pub struct McpServerKey",
+            "#[serde(rename = \"server_name\")]",
+            "scoped_environment_id: Option<String>",
+            "pub fn in_environment(environment: impl Into<String>, name: impl Into<String>) -> Self",
+            "scoped_environment_id: Some(environment.into())"
+          ]
+        },
+        {
+          "path": "codex-rs/rmcp-client/src/oauth.rs",
+          "reason": "Native OAuth persistence revalidates stored credentials under its guard so pending refreshes cannot overwrite newer login or logout state.",
+          "required_contains": [
+            "pub(super) async fn acquire_persistence_guard(",
+            "let expected = self.stored_credentials().await;",
+            "if normalized_oauth_credentials(current.as_ref()) != expected {",
+            "return Err(AuthError::AuthorizationRequired);",
+            "pub(super) async fn persist_with_manager("
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/requests/headers.rs",
+          "reason": "Realtime WebSocket and WebRTC callers share native thread/session correlation and bounded saved thread-source metadata.",
+          "required_contains": [
+            "pub fn build_realtime_thread_headers(",
+            "let mut headers = build_session_headers(Some(session_id), Some(thread_id));",
+            "&& source.as_str().len() <= 256",
+            "headers.insert(\"x-codex-turn-metadata\", value);"
+          ]
+        },
+        {
+          "path": "codex-rs/protocol/src/items/display.rs",
+          "reason": "Recovered answers use the native version-one tagged display contract; unreadable instructions remain restricted instead of silently displaying content.",
+          "required_contains": [
+            "pub struct AgentMessageDisplayVersion;",
+            "_ => Err(\"unsupported answer display version\")",
+            "#[serde(tag = \"mode\", rename_all = \"camelCase\")]",
+            "pub enum AgentMessageDisplay",
+            "moderated: stored.moderated || display.is_none(),"
           ]
         }
       ],
@@ -1859,7 +1969,7 @@
           "file_contains_all": [
             "ConversationStartTransport::Websocket",
             "realtime_request_headers",
-            "build_session_headers",
+            "build_realtime_thread_headers",
             "RealtimeWsVersion::V1",
             "openai-alpha",
             "quicksilver=v1"
@@ -2699,7 +2809,7 @@
           "id": "core.subagent-pending-environment-inheritance",
           "kind": "environment_inheritance",
           "file": "codex-rs/core/src/session/environment.rs",
-          "reason": "Pending subagent environments must inherit the owner\u2019s first ready/failure result without overwriting a child winner.",
+          "reason": "Pending subagent environments must inherit the owner’s first ready/failure result without overwriting a child winner.",
           "file_contains_all": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -3802,9 +3912,197 @@
             "\"effort\": \"ultra\"",
             "\"supports_reasoning_effort_updates\": true"
           ]
+        },
+        {
+          "id": "websocket.size-rejection-fallback",
+          "kind": "transport_fallback",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Native Codex honors handshake message limits before upload and treats size closes as HTTP fallback only before any text frame.",
+          "file_contains_all": [
+            ".get(X_CODEX_WEBSOCKET_MAX_MESSAGE_BYTES_HEADER)",
+            ".and_then(|value| value.parse::<usize>().ok());",
+            ".is_some_and(|limit| request_text.len() > limit)",
+            "let mut received_text = false;",
+            "received_text = true;",
+            "Message::Close(Some(frame)) if frame.code == CloseCode::Size && !received_text",
+            "return Err(ApiError::WebsocketMessageTooLarge);",
+            "x-codex-websocket-max-message-bytes"
+          ]
+        },
+        {
+          "id": "responses.immediate-http-fallback",
+          "kind": "transport_fallback",
+          "file": "codex-rs/core/src/responses_retry.rs",
+          "reason": "Oversized native WebSocket requests bypass socket retries while transport switching preserves the server-directed retry deadline.",
+          "file_contains_all": [
+            "let requires_http_fallback = err.requires_http_fallback();",
+            "(requires_http_fallback || retry_state.retries >= max_retries)",
+            "tokio::time::sleep_until(retry_after.deadline()).await;",
+            "if switched || requires_http_fallback {",
+            "retry_state.retries = 0;"
+          ]
+        },
+        {
+          "id": "responses.http-fallback-error-classification",
+          "kind": "transport_fallback",
+          "file": "codex-rs/protocol/src/error.rs",
+          "reason": "Size rejection remains a distinct native retry policy rather than generic stream retry or a terminal provider denial.",
+          "file_contains_all": [
+            "pub fn requires_http_fallback(&self) -> bool",
+            "matches!(self.retry_policy(), RetryPolicy::FallBackToHttp)",
+            "CodexErrorDetails::WebsocketMessageTooLarge => RetryPolicy::FallBackToHttp,"
+          ]
+        },
+        {
+          "id": "responses.allocated-wire-id-preservation",
+          "kind": "request_context",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Native request preparation retains allocated opaque or bare-prefix response item IDs while preserving provider normalization.",
+          "file_contains_all": [
+            "fn prepare_response_items_for_request(&self, input: &mut [ResponseItem])",
+            ".is_some_and(|id| id.allocation().is_none() && !id.is_prefixed())",
+            "item.set_id(/*new_id*/ None);"
+          ]
+        },
+        {
+          "id": "history.rollout-allocation-preservation",
+          "kind": "session_persistence",
+          "file": "codex-rs/history/src/rollout_payload.rs",
+          "reason": "Native rollout serialization preserves optional allocation and retained-assistant revision metadata without changing Responses wire IDs.",
+          "file_contains_all": [
+            "id_allocation: Option<Cow<'a, ResponseItemIdAllocation>>",
+            "id_allocation: id.and_then(ResponseItemId::allocation).map(Cow::Borrowed)",
+            "item.set_id(Some(id.with_allocation(allocation.into_owned())));",
+            "retained_source: retained_source.clone(),",
+            "retained_source: metadata.retained_source.clone(),"
+          ]
+        },
+        {
+          "id": "history.compaction-allocation-cursor",
+          "kind": "session_persistence",
+          "file": "codex-rs/history/src/model_id_ordinals.rs",
+          "reason": "Compaction and replay recover a nondecreasing allocation cursor from checkpoints, replacement history and retained sources, stamped in append order.",
+          "file_contains_all": [
+            "pub fn next_model_id_ordinals(records: &[RolloutItem]) -> (u64, u64)",
+            ".and_then(|m| m.next_item_ordinal)",
+            "item = item.max(next.checked_sub(1));",
+            "pub fn stamp_item_ordinals(mut next: u64, items: &mut [RolloutItem]) -> u64",
+            "next = next.max(next_model_id_ordinals(std::slice::from_ref(item)).0);",
+            "metadata.next_item_ordinal = Some(next);"
+          ]
+        },
+        {
+          "id": "resume.persisted-model-window",
+          "kind": "session_persistence",
+          "file": "codex-rs/core/src/session/model_ids.rs",
+          "reason": "Resume reuses its validated saved context window instead of allocating a provisional window; new and forked threads initialize independently.",
+          "file_contains_all": [
+            "pub(super) fn from_history(history: &InitialHistory) -> InitialModelIds",
+            "InitialHistory::Resumed(resumed)",
+            "checkpoint.window_id.as_ref()?.validated()",
+            "meta.meta.id == resumed.conversation_id",
+            "InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => None",
+            "resumed_window.unwrap_or_else(|| context_window_id_generator())"
+          ]
+        },
+        {
+          "id": "resume.permission-profile-label",
+          "kind": "session_persistence",
+          "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+          "reason": "Loaded-thread resume compares requested sandbox modes with the active permission profile label and preserves external-sandbox compatibility.",
+          "file_contains_all": [
+            ".legacy_sandbox_policy_label(config_snapshot.cwd().as_path())",
+            "SandboxMode::ReadOnly => active_sandbox_label == \"read-only\"",
+            "SandboxMode::WorkspaceWrite => active_sandbox_label == \"workspace-write\"",
+            "\"danger-full-access\" | \"external-sandbox\""
+          ]
+        },
+        {
+          "id": "resume.active-recovery-turn",
+          "kind": "session_persistence",
+          "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+          "reason": "Reconnect with overrides must not replace a loaded thread while its core recovery turn is active before status publication.",
+          "file_contains_all": [
+            "&& !has_subscribers",
+            "&& matches!(loaded_status, ThreadStatus::Idle)",
+            "&& !existing_thread.has_active_turn().await",
+            "match wait_for_thread_shutdown(&existing_thread).await"
+          ]
+        },
+        {
+          "id": "permissions.admission-preserves-denials",
+          "kind": "permission_boundary",
+          "file": "codex-rs/core/src/session/environment.rs",
+          "reason": "Session settings normalize a copy at admission and retain deny-read restrictions for permission-profile and legacy sandbox updates.",
+          "file_contains_all": [
+            "pub(super) fn apply_session_settings(",
+            "let mut updates = updates.clone();",
+            "file_system.preserve_deny_read_restrictions_from(&current_file_system);",
+            "FileSystemSandboxPolicy::from_legacy_sandbox_policy_preserving_deny_entries("
+          ]
+        },
+        {
+          "id": "mcp.environment-registration-identity",
+          "kind": "mcp_identity",
+          "file": "codex-rs/codex-mcp/src/server_key.rs",
+          "reason": "Exact MCP registration identity includes optional environment scope, separate from display names and execution location.",
+          "file_contains_all": [
+            "pub struct McpServerKey",
+            "#[serde(rename = \"server_name\")]",
+            "scoped_environment_id: Option<String>",
+            "pub fn in_environment(environment: impl Into<String>, name: impl Into<String>) -> Self",
+            "scoped_environment_id: Some(environment.into())"
+          ]
+        },
+        {
+          "id": "features.multi-environment-mcp-opt-in",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "Environment-scoped same-name MCP support remains experimental and disabled unless the user enables the native feature.",
+          "file_contains_all": [
+            "id: Feature::MultiEnvironmentMcp,\n        key: \"multi_environment_mcp\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+          ]
+        },
+        {
+          "id": "mcp.oauth-stale-persistence-rejection",
+          "kind": "credential_boundary",
+          "file": "codex-rs/rmcp-client/src/oauth.rs",
+          "reason": "Native OAuth persistence revalidates stored credentials under its guard so pending refreshes cannot overwrite newer login or logout state.",
+          "file_contains_all": [
+            "pub(super) async fn acquire_persistence_guard(",
+            "let expected = self.stored_credentials().await;",
+            "if normalized_oauth_credentials(current.as_ref()) != expected {",
+            "return Err(AuthError::AuthorizationRequired);",
+            "pub(super) async fn persist_with_manager("
+          ]
+        },
+        {
+          "id": "realtime.shared-thread-headers",
+          "kind": "request_context",
+          "file": "codex-rs/codex-api/src/requests/headers.rs",
+          "reason": "Realtime WebSocket and WebRTC callers share native thread/session correlation and bounded saved thread-source metadata.",
+          "file_contains_all": [
+            "pub fn build_realtime_thread_headers(",
+            "let mut headers = build_session_headers(Some(session_id), Some(thread_id));",
+            "&& source.as_str().len() <= 256",
+            "headers.insert(\"x-codex-turn-metadata\", value);"
+          ]
+        },
+        {
+          "id": "app-server.versioned-answer-display",
+          "kind": "protocol_extensions",
+          "file": "codex-rs/protocol/src/items/display.rs",
+          "reason": "Recovered answers use the native version-one tagged display contract; unreadable instructions remain restricted instead of silently displaying content.",
+          "file_contains_all": [
+            "pub struct AgentMessageDisplayVersion;",
+            "_ => Err(\"unsupported answer display version\")",
+            "#[serde(tag = \"mode\", rename_all = \"camelCase\")]",
+            "pub enum AgentMessageDisplay",
+            "moderated: stored.moderated || display.is_none(),"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.169.1",
+      "tested_codex_release": "rust-v0.170.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -4294,12 +4592,29 @@
             "codex": "105102da93472e8641b839554c7713849817943a09f76db3f4ea333fd67ce8b5"
           },
           "summary": "Adds GPT-6.2 Sol and Astra with native low reasoning defaults, Responses Lite, model-specific context windows and ultra delegation. Bedrock legacy incremental tools are now default-on. Mantle normalizes only empty assistant-commentary annotations before replay; native provider routing and user configuration remain authoritative."
+        },
+        {
+          "from": "rust-v0.169.1",
+          "to": "rust-v0.170.0",
+          "source_commit": "29eb79e9866b3262a777fdf8195c1b9e63684c91",
+          "tag_object": "72f97c309fb0f78b6f35cce455adf416e6a51571",
+          "source_archive_sha256": "d7c78b72ac4117acd66f0154841ec6bcd1b8d72a6f68fd00f90c34e526db643f",
+          "tree_comparison": {
+            "added": 31,
+            "removed": 2,
+            "modified": 450
+          },
+          "native_linux_package_sha256": "e2f9a148c8623338400d282e233a7a82024b4bf73803c400c3faf7a8415ddcab",
+          "native_linux_asset_sha256": {
+            "codex": "880819aab735adcf16f36cd628940b9f1e652a36c01d10a5d32f83cc84902971"
+          },
+          "summary": "Qualifies immediate oversized-WebSocket HTTP fallback, advertised message limits, saved allocation/revision metadata, active recovery turns, permission-profile resume matching, environment-scoped MCP identities, cancellation-safe OAuth persistence, shared realtime thread headers and versioned answer display. GPT-6.2 catalog and Mantle normalization contracts remain present. Native feature defaults and session ownership remain authoritative."
         }
       ],
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
-        "schema_hash_note": "The selected stable v2 lifecycle hashes were revalidated against the official Codex 0.169.1 binary and are unchanged from 0.169.0. Required lifecycle methods remain validated, including experimental queue and MCP RPCs with --experimental.",
+        "schema_hash_note": "The 13 selected stable v2 lifecycle hashes were revalidated against the official Codex 0.170.0 binary. Seven response/notification schemas adopt the version-one show/hide/block AgentMessageDisplay contract; request and interrupt schemas remain unchanged. Required lifecycle methods are validated with --experimental.",
         "required_methods": [
           "initialize",
           "initialized",
@@ -4315,31 +4630,35 @@
         ],
         "stable_v2_sha256": {
           "ThreadForkParams.json": "60540b97d453ddbc5e12bfaa007a3718f31847d18dec0da59a5e4b89be4717ad",
-          "ThreadForkResponse.json": "4ed3ca01b482c774585ac55ed9a9b85c8f6c93adae858ba497c2d618c171aea2",
+          "ThreadForkResponse.json": "8214b312a37ab2fbaa1ef66f887b4e71c5b8c865e1aba82552fecb4698338028",
           "ThreadResumeParams.json": "cb2daef3e452f9dcb6cdd7a7a389b866ac486614558a46f3ec5538f3fe3b3ea1",
-          "ThreadResumeResponse.json": "450a6fd48542176397203b5a60581a7db86ab0d33aa979e8922873ac7df5ece5",
+          "ThreadResumeResponse.json": "0f174f94ba857ab81efb3f02f5e81a9719fd19e12b55a015f5d7c2c3d225d35d",
           "ThreadStartParams.json": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428",
-          "ThreadStartResponse.json": "e54031895f7552122a79123a74bf398deb4ebf97227accc7683bae08400d3e65",
-          "ThreadStartedNotification.json": "d745023b8b64db69138fe32a42c12aafe3c367678097604803d33566a8bdc184",
-          "TurnCompletedNotification.json": "c4a22a9a8c1fad4c2dceda0d4d1593ce7f2435107d6219fb678925d18f915f6b",
+          "ThreadStartResponse.json": "efe4f9f8f4c017144fbacaa72e37c27389bc9e37d2d4875cba39b76dc8d532be",
+          "ThreadStartedNotification.json": "ba106c0f2391a73be06fd12fcc1d71fc26a791e2ca98de7bdab667d7bab8807d",
+          "TurnCompletedNotification.json": "1b7424e28723a1324f325c99dbfdf949a50e005cc5f90b813a21f5bbdaadae5b",
           "TurnInterruptParams.json": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b",
           "TurnInterruptResponse.json": "531de6be06fe979b5963f249bab82498a175e614bf65ac12fb2e849dfe60bcf1",
           "TurnStartParams.json": "7306e8a95152f1071b0fb8bcc22da20a798ae34c1c57b6d26dfafc2c2b47ee9e",
-          "TurnStartResponse.json": "e08d29ed53ac18395874d68c1b35c41e77dfc815a8aee09950462ff8098c240d",
-          "TurnStartedNotification.json": "b386381e73a8f75578310d53cba3a9384ab728f219801284d948bd9a82fc772c"
+          "TurnStartResponse.json": "a72be8b386a4f5738907df4177194deb0be6e4db42b852cce6bd9b9d54ab3e19",
+          "TurnStartedNotification.json": "80f2997d4589440a047e9f7d056c9ed857ce41741c5fbf4083747877b7f74a60"
         }
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.169.1",
-      "name": "0.169.1",
-      "published_at": "2026-11-17T22:21:10Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.169.1",
+      "tag_name": "rust-v0.170.0",
+      "name": "0.170.0",
+      "published_at": "2026-11-18T03:40:48Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.170.0",
       "body_head": [
-        "## Chores",
-        "No verified release highlights available.",
-        "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.169.0...rust-v0.169.1"
+        "## New Features",
+        "- Added WebRTC negotiation for realtime voice calls in the TUI. (#61172)",
+        "- Added automatically refreshed authentication headers for OpenTelemetry HTTP exporters. (#61028)",
+        "- Added experimental support for using identically named MCP servers across environments. (#60905)",
+        "## Bug Fixes",
+        "- Oversized WebSocket requests now fall back to HTTP without unnecessary retries. (#60840, #60841)",
+        "- Fixed MCP OAuth credential races during cancellation, login, and logout. (#60849, #60981)",
+        "- Improved automatic reconnection for Cloud conversations and preserved active recovery turns when clients reconnect. (#60969, #61014)"
       ]
     }
   },
