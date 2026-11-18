@@ -2,6 +2,7 @@ use super::migrate_legacy_openai_sessions_for_launch;
 use crate::{AppPaths, PreparedRuntimeLaunch};
 use std::ffi::OsString;
 use std::fs;
+use std::path::PathBuf;
 
 #[test]
 fn external_home_index_is_repaired_before_uuid_and_in_app_resume() {
@@ -32,8 +33,13 @@ fn external_home_index_is_repaired_before_uuid_and_in_app_resume() {
             managed: false,
             runtime_proxy: None,
         };
-        let relative =
-            format!("sessions/2026/01/01/rollout-2026-01-01T00-00-00-{session_id}.jsonl");
+        // Build the expected path using native separators. The repair reconstructs
+        // components, so a slash-delimited string would differ only on Windows.
+        let relative = PathBuf::from("sessions")
+            .join("2026")
+            .join("01")
+            .join("01")
+            .join(format!("rollout-2026-01-01T00-00-00-{session_id}.jsonl"));
         let rollout = home.join(&relative);
         fs::create_dir_all(rollout.parent().unwrap()).unwrap();
         let metadata = serde_json::json!({"id":session_id,"session_id":session_id,
@@ -48,7 +54,8 @@ fn external_home_index_is_repaired_before_uuid_and_in_app_resume() {
         let db = rusqlite::Connection::open(&database).unwrap();
         db.execute_batch("CREATE TABLE threads(id TEXT PRIMARY KEY,rollout_path TEXT,model_provider TEXT,title TEXT,updated_at INTEGER);").unwrap();
         let stale = root
-            .join("profiles/.prodex-overlay-retired-0")
+            .join("profiles")
+            .join(".prodex-overlay-retired-0")
             .join(&relative);
         db.execute(
             "INSERT INTO threads VALUES(?1,?2,'prodex-local','preserve title',123)",
