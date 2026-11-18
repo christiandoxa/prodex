@@ -132,6 +132,19 @@ fn process_response_frame(
         Ok(WsMessage::Binary(payload)) => flow.handle_binary(payload)?,
         Ok(WsMessage::Ping(payload)) => flow.handle_ping(payload)?,
         Ok(WsMessage::Pong(_) | WsMessage::Frame(_)) => flow.handle_keepalive()?,
+        Ok(WsMessage::Close(Some(frame)))
+            if frame.code == tungstenite::protocol::frame::coding::CloseCode::Size
+                && !flow.first_upstream_text_seen
+                && !flow.committed =>
+        {
+            // Any text, including hidden precommit metadata, ends the native
+            // early-size-fallback window. Never retry/rotate this size signal.
+            let _ = flow.upstream_socket.flush();
+            flow.websocket_session.reset();
+            return Ok(ResponseFrameAction::Attempt(
+                RuntimeWebsocketAttempt::MessageTooLarge { close_frame: frame },
+            ));
+        }
         Ok(WsMessage::Close(_)) => return Ok(ResponseFrameAction::Close),
         Err(WsError::ConnectionClosed | WsError::AlreadyClosed) => {
             return Ok(ResponseFrameAction::ConnectionClosed);
@@ -146,6 +159,9 @@ fn process_response_text(
     interrupt: &mut super::control::ResponseInterrupt,
     text: &str,
 ) -> Result<ResponseFrameAction> {
+    // Native size fallback ends at the raw text boundary, even when an
+    // internal interruption acknowledgement consumes the frame.
+    flow.mark_text_progress()?;
     if interrupt.observe_ack(flow, text)? {
         return Ok(interrupt
             .take_terminal()

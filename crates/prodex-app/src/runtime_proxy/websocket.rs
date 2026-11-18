@@ -310,6 +310,11 @@ fn handle_runtime_proxy_websocket_connect_attempt(
             Ok(Some(RuntimeWebsocketConnectResult::Connected {
                 socket,
                 turn_state,
+                max_message_bytes: response
+                    .headers()
+                    .get("x-codex-websocket-max-message-bytes")
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<usize>().ok()),
                 routing_pin: prodex_runtime_cookies::RuntimeProxyRoutingPin::from_handshake(
                     upstream_url,
                     response.headers(),

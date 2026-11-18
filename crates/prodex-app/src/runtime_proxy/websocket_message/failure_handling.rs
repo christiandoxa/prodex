@@ -40,6 +40,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         match attempt {
             RuntimeWebsocketAttempt::Delivered => Ok(RuntimeWebsocketMessageLoopAction::Finished),
+            RuntimeWebsocketAttempt::MessageTooLarge { close_frame } => {
+                self.handle_message_too_large(close_frame)
+            }
             RuntimeWebsocketAttempt::QuotaBlocked {
                 profile_name,
                 payload,
@@ -105,6 +108,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         match attempt {
             RuntimeWebsocketAttempt::Delivered => Ok(RuntimeWebsocketMessageLoopAction::Finished),
+            RuntimeWebsocketAttempt::MessageTooLarge { close_frame } => {
+                self.handle_message_too_large(close_frame)
+            }
             RuntimeWebsocketAttempt::QuotaBlocked {
                 profile_name,
                 payload,
@@ -157,6 +163,24 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.apply_previous_response_not_found_action(action, payload)
             }
         }
+    }
+
+    fn handle_message_too_large(
+        &mut self,
+        close_frame: tungstenite::protocol::CloseFrame,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        // This ends only the WS transport. Existing response/session bindings
+        // continue to own the native HTTP fallback request.
+        self.websocket_session.close();
+        self.local_socket.close(Some(close_frame))?;
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} websocket_message_too_large action=http_fallback",
+                self.request_id, self.session_id
+            ),
+        );
+        Ok(RuntimeWebsocketMessageLoopAction::Finished)
     }
 
     fn handle_invalid_previous_response_id(

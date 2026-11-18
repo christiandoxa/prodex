@@ -79,6 +79,8 @@ mod guardian {
         assert!(runtime_proxy_guardian_pin(&shared, "second", &id).is_none());
     }
 }
+#[path = "websocket/message_size.rs"]
+mod message_size;
 #[path = "websocket/precommit_hold.rs"]
 mod precommit_hold;
 #[path = "websocket/precommit_regressions.rs"]

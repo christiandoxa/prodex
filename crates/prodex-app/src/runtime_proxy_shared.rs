@@ -198,6 +198,9 @@ pub(super) struct RuntimePrefetchReader {
 #[derive(Debug)]
 pub(super) enum RuntimeWebsocketAttempt {
     Delivered,
+    MessageTooLarge {
+        close_frame: tungstenite::protocol::CloseFrame,
+    },
     QuotaBlocked {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
@@ -251,6 +254,7 @@ pub(super) enum RuntimeWebsocketConnectResult {
     Connected {
         socket: RuntimeUpstreamWebSocket,
         turn_state: Option<String>,
+        max_message_bytes: Option<usize>,
         routing_pin: Option<std::sync::Arc<prodex_runtime_cookies::RuntimeProxyRoutingPin>>,
     },
     QuotaBlocked(RuntimeWebsocketErrorPayload),

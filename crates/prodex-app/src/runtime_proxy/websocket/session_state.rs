@@ -19,6 +19,7 @@ pub(in crate::runtime_proxy) struct RuntimeWebsocketSessionState {
     realtime_duplex: bool,
     pub(in crate::runtime_proxy) profile_name: Option<String>,
     pub(in crate::runtime_proxy) turn_state: Option<String>,
+    pub(in crate::runtime_proxy) max_message_bytes: Option<usize>,
     inflight_guard: Option<RuntimeProfileInFlightGuard>,
     last_terminal_at: Option<Instant>,
     transport_generation: u64,
@@ -138,6 +139,7 @@ impl RuntimeWebsocketSessionState {
         self.parent_pin = None;
         self.profile_name = None;
         self.turn_state = None;
+        self.max_message_bytes = None;
         self.inflight_guard = None;
     }
 
@@ -149,6 +151,7 @@ impl RuntimeWebsocketSessionState {
         self.routing_pin = None;
         self.parent_pin = None;
         self.turn_state = None;
+        self.max_message_bytes = None;
         self.inflight_guard = None;
     }
 }

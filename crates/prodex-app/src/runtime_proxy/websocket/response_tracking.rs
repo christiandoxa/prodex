@@ -239,7 +239,6 @@ enum RuntimeWebsocketTextResult {
 
 impl RuntimeWebsocketResponseLoop<'_> {
     fn handle_text(&mut self, text: String) -> Result<RuntimeWebsocketTextResult> {
-        self.mark_text_progress()?;
         let stream_payload = runtime_websocket_stream_payload_from_text(&text);
         let inspected = self.inspect_text(&text)?;
         let mut plan = self.plan_frame(

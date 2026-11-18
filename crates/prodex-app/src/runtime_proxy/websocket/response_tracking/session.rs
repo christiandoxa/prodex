@@ -233,8 +233,10 @@ pub(super) fn start_runtime_websocket_upstream_session(
             Ok(RuntimeWebsocketConnectResult::Connected {
                 socket,
                 turn_state,
+                max_message_bytes,
                 routing_pin,
             }) => {
+                websocket_session.max_message_bytes = max_message_bytes;
                 websocket_session.routing_pin = routing_pin;
                 websocket_session.parent_pin = guardian_parent_pin.cloned();
                 (socket, turn_state, inflight_guard.take())

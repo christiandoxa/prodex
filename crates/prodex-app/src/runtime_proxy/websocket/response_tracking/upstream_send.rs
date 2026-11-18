@@ -63,6 +63,25 @@ pub(super) fn send_runtime_websocket_upstream_request(
     )? {
         upstream_request_text = std::borrow::Cow::Owned(String::from_utf8(reserve_body)?);
     }
+    super::bound_runtime_websocket_precommit_io(upstream_socket, shared)?;
+    if !response_committed
+        && !websocket_session.is_realtime_duplex()
+        && websocket_session
+            .max_message_bytes
+            .is_some_and(|limit| upstream_request_text.len() > limit)
+    {
+        // The local upgrade precedes profile selection, so the upstream limit
+        // cannot be copied into that handshake. Enforce it on the final wire
+        // payload and let native Codex switch transports before any generation.
+        websocket_session.reset();
+        let _ = upstream_socket.close(None);
+        return Ok(Some(RuntimeWebsocketAttempt::MessageTooLarge {
+            close_frame: tungstenite::protocol::CloseFrame {
+                code: tungstenite::protocol::frame::coding::CloseCode::Size,
+                reason: "request exceeds upstream WebSocket message limit".into(),
+            },
+        }));
+    }
     log_runtime_upstream_payload_snapshot(
         shared,
         request_id,
@@ -71,7 +90,6 @@ pub(super) fn send_runtime_websocket_upstream_request(
         profile_name,
         upstream_request_text.as_bytes(),
     );
-    super::bound_runtime_websocket_precommit_io(upstream_socket, shared)?;
     if let Err(err) =
         send_text_with_bounded_frames(upstream_socket, upstream_request_text.into_owned().into())
     {

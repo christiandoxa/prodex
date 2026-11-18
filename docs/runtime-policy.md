@@ -209,6 +209,16 @@ previous response instead uses the existing native full-context retry signal
 when eligible. After output commitment, transport failure remains terminal:
 no profile rotation, duplicated output, or invented response completion.
 
+Codex 0.170 can switch an oversized Responses request to HTTP when it receives
+WebSocket close code `1009` before any upstream text frame. Prodex preserves that
+signal without retrying another WebSocket or marking the profile as unhealthy.
+It also checks the final serialized upstream request against the optional
+`x-codex-websocket-max-message-bytes` handshake limit before sending it. A request
+that exceeds the limit receives the same early close signal, including during
+prewarming. Missing or invalid limits leave the existing transport behavior in
+place. A size close after an upstream text frame follows the ordinary recovery
+and commitment rules. Native Codex owns the HTTP fallback; the normal HTTP path
+retains configured proxy routing and continuation ownership.
 
 Authenticated `admin` and read-only `viewer` principals can `POST /v1/prodex/gateway/routes/explain` or use **Route Workbench** in `/v1/prodex/gateway/admin`. The bounded JSON response uses the same pure planner as live routing and includes alias resolution, requirements, candidate decisions, adjustments, warnings, and trace truncation. The optional global current-load snapshot is available only to unscoped principals; the dashboard uses the side-effect-free catalog-only view. Explain authenticates and authorizes through the normal admin control-plane boundary and writes only redacted audit metadata. It does not call upstreams, refresh credentials, reserve billing/quota, increment request/model/inflight counters, mutate affinity/round-robin/circuit/prompt-cache state, or persist runtime state. Submitted request JSON is neither logged nor stored by the dashboard. Historical trace storage is not provided; explain results are on-demand and non-durable.
 
