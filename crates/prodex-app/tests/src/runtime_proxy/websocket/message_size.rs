@@ -5,6 +5,27 @@ use crate::runtime_proxy::websocket_message::{
 };
 use tungstenite::protocol::{CloseFrame, frame::coding::CloseCode};
 
+struct MessageLimitHeaders(Vec<String>);
+
+impl tungstenite::handshake::server::Callback for MessageLimitHeaders {
+    fn on_request(
+        self,
+        _: &tungstenite::handshake::server::Request,
+        mut response: tungstenite::handshake::server::Response,
+    ) -> std::result::Result<
+        tungstenite::handshake::server::Response,
+        tungstenite::handshake::server::ErrorResponse,
+    > {
+        for header in &self.0 {
+            response.headers_mut().append(
+                "x-codex-websocket-max-message-bytes",
+                tungstenite::http::HeaderValue::from_str(header).unwrap(),
+            );
+        }
+        Ok(response)
+    }
+}
+
 fn run_size_request(
     local: &mut RuntimeLocalWebSocket,
     shared: &RuntimeRotationProxyShared,
@@ -108,20 +129,7 @@ fn advertised_limit_case(name: &str, headers: &[&str], text: &str, fallback: boo
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        let mut socket = tungstenite::accept_hdr(
-            stream,
-            move |_: &tungstenite::handshake::server::Request,
-                  mut response: tungstenite::handshake::server::Response| {
-                for header in &headers {
-                    response.headers_mut().append(
-                        "x-codex-websocket-max-message-bytes",
-                        tungstenite::http::HeaderValue::from_str(header).unwrap(),
-                    );
-                }
-                Ok(response)
-            },
-        )
-        .unwrap();
+        let mut socket = tungstenite::accept_hdr(stream, MessageLimitHeaders(headers)).unwrap();
         let first = socket.read().unwrap();
         if matches!(first, WsMessage::Text(_)) {
             socket
@@ -308,18 +316,8 @@ fn websocket_size_reused_connection_retains_limit_and_response_affinity() {
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        let mut socket = tungstenite::accept_hdr(
-            stream,
-            |_: &tungstenite::handshake::server::Request,
-             mut response: tungstenite::handshake::server::Response| {
-                response.headers_mut().insert(
-                    "x-codex-websocket-max-message-bytes",
-                    tungstenite::http::HeaderValue::from_static("128"),
-                );
-                Ok(response)
-            },
-        )
-        .unwrap();
+        let mut socket =
+            tungstenite::accept_hdr(stream, MessageLimitHeaders(vec!["128".into()])).unwrap();
         assert!(matches!(socket.read().unwrap(), WsMessage::Text(_)));
         socket
             .send(WsMessage::Text(
