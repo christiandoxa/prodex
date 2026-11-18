@@ -54,6 +54,7 @@ fn persistent_formats_and_calendar_boundaries_are_stable() {
     let today = NaiveDate::parse_from_str("2024-03-01", "%Y-%m-%d").unwrap();
     assert_eq!(today.pred_opt().unwrap().format("%Y-%m-%d"), "2024-02-29");
     assert_eq!((today.year(), today.month(), today.day()), (2024, 3, 1));
+    assert_eq!(today.to_string(), "2024-03-01");
     let clock = NaiveTime::parse_from_str("11:45 PM", "%I:%M %p").unwrap();
     let next = today
         .and_time(clock)
@@ -145,4 +146,19 @@ fn rfc2822_logs_and_retry_dates_keep_their_parsing_contract() {
     let before = Utc::now().timestamp();
     let local = Local::now().with_timezone(&Utc).timestamp();
     assert!((before..=Utc::now().timestamp()).contains(&local));
+}
+
+#[test]
+fn unix_constructor_uses_floor_seconds_with_positive_fraction() {
+    for (seconds, nanos, expected) in [
+        (-1, 999_000_000, "1969-12-31T23:59:59.999+00:00"),
+        (-1, 1, "1969-12-31T23:59:59.000000001+00:00"),
+        (0, 1, "1970-01-01T00:00:00.000000001+00:00"),
+        (1, 999_000_000, "1970-01-01T00:00:01.999+00:00"),
+    ] {
+        let value = Utc.timestamp_opt(seconds, nanos).single().unwrap();
+        assert_eq!(value.to_rfc3339(), expected);
+        assert_eq!(value.timestamp(), seconds);
+        assert_eq!(value.timestamp_subsec_nanos(), nanos);
+    }
 }

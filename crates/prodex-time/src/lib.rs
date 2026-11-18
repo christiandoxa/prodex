@@ -155,6 +155,8 @@ impl<T> LocalResult<T> {
         self.earliest
     }
 }
+/// Host timezone conversion used by timestamp and calendar consumers.
+/// Ambiguous civil times require an explicit choice and gaps resolve to no value.
 pub trait TimeZone: Sized + Clone {
     const IS_UTC: bool = false;
     fn zone(&self) -> tz::TimeZone;
@@ -224,6 +226,7 @@ impl TimeZone for FixedOffset {
     }
 }
 
+/// Calendar components used in persisted session paths and quota displays.
 pub trait Datelike {
     fn year(&self) -> i32;
     fn month(&self) -> u32;
@@ -255,6 +258,11 @@ impl Datelike for NaiveDate {
     }
     fn day(&self) -> u32 {
         self.0.day() as u32
+    }
+}
+impl std::fmt::Display for NaiveDate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, formatter)
     }
 }
 impl NaiveDate {

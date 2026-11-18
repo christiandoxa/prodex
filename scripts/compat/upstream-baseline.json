@@ -4299,7 +4299,7 @@
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
-        "schema_hash_note": "The selected stable v2 lifecycle hashes were revalidated against the official Codex 0.169.1 binary and are unchanged from 0.169.0. Required lifecycle methods remain validated, including experimental queue and MCP RPCs with --experimental-schemas.",
+        "schema_hash_note": "The selected stable v2 lifecycle hashes were revalidated against the official Codex 0.169.1 binary and are unchanged from 0.169.0. Required lifecycle methods remain validated, including experimental queue and MCP RPCs with --experimental.",
         "required_methods": [
           "initialize",
           "initialized",
