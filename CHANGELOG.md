@@ -2,6 +2,88 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.169.2 - 2026-11-18
+
+### Deps
+
+- Replace unmaintained Chrono with a Jiff host time boundary (`cc1a6fa`)
+
+### Misc
+
+- Preserve persisted calendar display and timestamp contracts (`44c3391`)
+- Qualify Codex 0.169.1 provider and model contracts (`e9b9fa2`)
+- Add GPT-6.2 Astra and Sol without overriding native defaults (`f7437e7`)
+- Repair external home rollout indexes before launch (`f60da6b`)
+# Prodex 0.169.2
+
+Qualify Codex CLI 0.169.1, add GPT-6.2 Astra and Sol, and repair external-profile
+session resume after a temporary overlay has been removed.
+
+## New Features
+
+- Add `gpt-6.2-astra` and `gpt-6.2-sol` to the canonical OpenAI model catalog.
+  Both accept text and image inputs, support 1,050,000 API context tokens and
+  128,000 output tokens, and use Responses for tool calling. The Codex-facing
+  effort catalog includes `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`,
+  with `low` as the bundled default. `ultra` is native task delegation, not a
+  promise that every API/account configuration supports that mode.
+- Qualify the official Codex CLI 0.169.1 package and generated app-server schemas.
+  Preserve upstream's default-on Bedrock incremental tools and Mantle's narrowly
+  scoped empty-commentary-annotation normalization before replay.
+
+## Bug Fixes
+
+- Repair stale SQLite rollout pointers in the selected persistent external or
+  profileless home before UUID resume or interactive `/resume`. The verified
+  transcript remains at its original path; its UUID, contents, title, and update
+  time are not rewritten. Missing or mismatched transcripts are never fabricated.
+- Use conservative native fallback context windows for GPT-6.2 Smart Context
+  accounting: 272,000 for Astra and 500,000 for Sol. Explicit launch limits still
+  take precedence. This does not enable an unproven tokenizer or override Codex
+  context, compaction, or reasoning configuration.
+
+## Compatibility and Upgrade
+
+The qualified client is [Codex CLI 0.169.1](https://github.com/openai/codex/releases/tag/rust-v0.169.1).
+The upstream patch contains model catalog additions, Bedrock incremental-tool
+activation, and provider-owned Mantle replay normalization; Prodex does not
+reimplement or force those provider policies.
+
+Native Codex context defaults are not the API maximum: Astra starts at 272,000
+and Sol at 500,000, while their bundled opt-in maximum is 872,000. Account model
+catalogs remain authoritative for availability and reasoning levels, including
+main-agent and sub-agent selections. Existing exact model IDs, established
+`astra`/`sol` aliases, saved sessions, and explicit CLI configuration are retained.
+No unverified Copilot or Kiro model entitlement is added.
+
+Flat catalog prices remain unknown because they cannot faithfully represent the
+published context-length, cache, and processing-tier prices. See the official
+[GPT-6.2 announcement](https://openai.com/index/introducing-gpt-6-2-astra-sol/),
+[Astra API metadata](https://developers.openai.com/api/docs/models/gpt-6.2-astra),
+[Sol API metadata](https://developers.openai.com/api/docs/models/gpt-6.2-sol), and
+[pinned native catalog](https://github.com/openai/codex/blob/c376cf7396eff83ce4c6ac61b9553df142e7a0be/codex-rs/models-manager/models.json).
+
+The 0.169.1 fixes for untrusted `/goal` context, proxy transport, custom trust,
+and persistent goal state are retained. The already-published 0.169.1 tag and
+artifacts are not replaced. Native account discovery over a SOCKS-only listener
+remains outside Prodex-owned inference transport qualification.
+
+## Changelog
+
+- Qualify the official Kiro CLI 3.4.0 stable archive, its chat and ACP command
+  surfaces, and release installer fixtures; retain the existing runtime defaults.
+- Replace the unmaintained registry Chrono dependency (RUSTSEC-2026-0543) with
+  a Jiff-backed host time boundary. Preserve session date paths, persisted timestamp
+  formats, quota reset parsing, and daylight-saving handling without suppressing
+  the dependency advisory or altering runtime policy.
+- Extend model, account-catalog, context-preservation, and external-home resume
+  regression coverage. Keep compatibility guards pinned to the audited source
+  and generated native lifecycle schemas.
+- Retain RTK, Codebase Memory MCP, Playwright MCP, and Ponytail activation in
+  Super, and preserve the existing Presidio consent boundary.
+
+Full Changelog: [0.169.1...0.169.2](https://github.com/christiandoxa/prodex/compare/0.169.1...0.169.2)
+
 ## 0.169.1 - 2026-11-16
 
 ### Runtime
@@ -30,63 +112,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Qualify 0.0.21 and isolate ambient endpoint settings (`5d8797a`)
 - Keep external overlay goals and session indexes persistent (`4ad5fc2`)
 - Preserve untrusted goal context without replaying stale history (`dc938e4`)
-# Prodex 0.169.1
-
-Respect outbound proxy and certificate settings across native transports and session
-resume; preserve native goal context on local Chat Completions adapters.
-
-## New Features
-
-- Qualify native WebSocket forwarding through authenticated SOCKS5 and HTTPS proxies
-  while retaining endpoint-aware bypass rules and certificate validation.
-
-## Bug Fixes
-
-- Support HTTP CONNECT, HTTPS proxy tunnels, and SOCKS5/SOCKS5h for native WebSockets,
-  including proxy authentication and bounded negotiation. Preserve explicit proxy
-  bypass and `NO_PROXY`; never retry a failed configured proxy by silently dialing direct.
-- Apply `CODEX_CA_CERTIFICATE`, falling back to `SSL_CERT_FILE`, consistently to upstream
-  HTTP and WebSockets without disabling certificate verification.
-- Scope reusable runtime brokers to an opaque fingerprint of outbound proxy, bypass,
-  and custom trust settings. A new launch cannot inherit a stale broker's proxy;
-  existing sessions on that broker are left intact.
-- Keep SQLite session indexes, queues, and goals in the persistent source home for
-  external/profileless Super launches as well as managed profiles. A disposable
-  overlay no longer loses newly created goal state or hides saved sessions.
-- Preserve named, unpaired native context such as `goal_objective` as untrusted user-level
-  context when translating Responses to Chat Completions. Its item ID is not a tool-call
-  owner. Full-history local goal continuation no longer prepends cached conversation
-  items or duplicates reasoning; real delta-only tool replies retain history recovery.
-
-## Compatibility and Upgrade
-
-The qualified native client remains Codex CLI 0.169.0. UUID resume, `prodex resume`,
-interactive `/resume`, local API-key authentication, explicit model/context selection,
-reasoning logs, and compaction retain their existing contracts. Session history is not
-rewritten or truncated by these changes. RTK, Codebase Memory MCP, Playwright MCP,
-and Ponytail remain automatic in Super; Presidio still asks for consent.
-
-SOCKS transport qualification covers Prodex-owned inference and session continuation. Codex 0.169.0's own account-discovery HTTP client does not enable
-SOCKS support; ChatGPT discovery through a SOCKS-only listener remains an upstream
-limitation. Use the proxy's HTTP CONNECT listener for that native login path.
-Prodex does not bypass the selected proxy to conceal an unsupported upstream client.
-
-Issue #128 reports a pre-commit failure without its exact proxy configuration or
-transport log. This release addresses independently reproduced proxy compatibility
-gaps; the reporter's deployment still needs confirmation with the updated version.
-
-## Changelog
-
-- Qualify official tunnel-client 0.0.21; isolate its new ambient residency, OAuth-discovery,
-  and admin-UI settings without clearing proxy or bypass variables.
-
-- Integrate Dependabot #129 and #130: arc-swap 1.9.5, rpassword 7.5.5, rusqlite 0.42.0,
-  uuid 1.29.2, zstd 0.14.4, and their reviewed lockfile updates, including fuzz metadata.
-- Integrate Dependabot #131: SonarQube scan action 8.5.0, pinned to its immutable commit.
-- Integrate Dependabot #132: refresh the Rust 1.99.1 Bookworm image digest without
-  changing the selected Rust compiler version.
-
-Full Changelog: [0.169.0...0.169.1](https://github.com/christiandoxa/prodex/compare/0.169.0...0.169.1)
 
 ## 0.169.0 - 2026-11-13
 
@@ -181,10 +206,3 @@ Full Changelog: [0.169.0...0.169.1](https://github.com/christiandoxa/prodex/comp
 ### Misc
 
 - Qualify Codex 0.167.0 lifecycle and request contracts (`4da2c28`)
-
-## 0.166.4 - 2026-11-05
-
-### Runtime
-
-- Remove default request body size ceiling (`616792a`)
-- Preserve large payloads during request handling (`d59e47e`)
