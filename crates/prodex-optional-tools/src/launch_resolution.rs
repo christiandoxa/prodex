@@ -150,12 +150,6 @@ mod managed_probe_tests {
         fs::create_dir_all(&root).unwrap();
         let node = root.join("node");
         let npx = root.join("npx");
-        fs::write(
-            &npx,
-            "#!/bin/sh\n: > \"$0.executed\"\n[ \"$*\" = \"--prefer-offline --no-install @playwright/mcp --version\" ] || exit 42\nprintf 'Version %s\\n' \"$TEST_PLAYWRIGHT_VERSION\"\n",
-        )
-        .unwrap();
-        fs::set_permissions(&npx, fs::Permissions::from_mode(0o700)).unwrap();
         let test = format!(
             "{}::playwright_launch_checks_node_before_package_probe",
             module_path!()
@@ -170,10 +164,15 @@ mod managed_probe_tests {
         ] {
             fs::write(&node, format!("#!/bin/sh\nprintf '{node_version}\\n'\n")).unwrap();
             fs::set_permissions(&node, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::write(
+                &npx,
+                format!("#!/bin/sh\n: > \"$0.executed\"\n[ \"$*\" = \"--prefer-offline --no-install @playwright/mcp --version\" ] || exit 42\nprintf 'Version {package_version}\\n'\n"),
+            )
+            .unwrap();
+            fs::set_permissions(&npx, fs::Permissions::from_mode(0o700)).unwrap();
             let result = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", test, "--test-threads=1"])
                 .env(CHILD, expected)
-                .env("TEST_PLAYWRIGHT_VERSION", package_version)
                 .env("PATH", &root)
                 .env("HOME", &root)
                 .env("USERPROFILE", &root)

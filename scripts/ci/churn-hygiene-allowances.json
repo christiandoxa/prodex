@@ -6,12 +6,13 @@
       "build(deps): refresh stable Rust dependencies",
       "feat(compat): qualify Codex 0.171.0 and pass through remote exec",
       "feat(tools): qualify RTK 1.2.1 and Playwright MCP 0.0.86",
-      "ci(compat): record audited Codex 0.171.0 integration"
+      "ci(compat): record audited Codex 0.171.0 integration",
+      "test(tools): keep Playwright version fixtures isolated"
     ],
     "caps": {
       "maxFiles": 47,
       "maxBehaviorFiles": 35,
-      "maxLines": 1020,
+      "maxLines": 1030,
       "maxFileLines": 183
     },
     "reason": "Reviewed the combined source range for the Rust 1.100.0 pin and stable dependency refresh, exact Codex 0.171.0 generated fixtures, regression-tested remote exec routing, and required RTK and Playwright release freshness updates. Each source commit meets ordinary limits. This allowance covers the reviewed file-count increase across those named commits and leaves the ordinary line limits and all correctness, platform, and security gates enforced."
