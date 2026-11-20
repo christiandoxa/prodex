@@ -2,6 +2,53 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.171.0 - 2026-11-20
+
+### Claude
+
+- Qualify RTK 1.2.1 and Playwright MCP 0.0.86 (`881bfba`)
+
+### Misc
+
+- Qualify Codex 0.171.0 and pass through remote exec (`30cd378`)
+# Prodex 0.171.0
+
+Qualify Codex CLI 0.171.0 and update the Rust compiler and locked dependencies.
+
+## New Features
+
+- Use `prodex run exec --remote <address>` to start a noninteractive turn on an
+  existing Codex app server. Use `exec resume <thread-id> --remote <address>` to
+  continue a server-owned thread. Codex handles the connection and authentication.
+- Qualify the native 0.171.0 lifecycle schemas, including scoped MCP status and
+  the provider-default RPC. GPT-6.2 Sol and Astra, workspace previews, and the
+  custom status line remain available through native Codex configuration.
+
+## Bug Fixes
+
+- Keep local profile selection, quota preflight, session repair, and proxy
+  overrides out of remote noninteractive launches. The existing app server owns
+  the thread, provider credentials, and permissions.
+- Report the Node.js 20+ requirement for Playwright MCP 0.0.86. Older compatible
+  Playwright MCP packages can still use Node.js 18+.
+
+## Upstream Compatibility
+
+The standalone wrapper uses a separately installed [Codex CLI 0.171.0](https://github.com/openai/codex/releases/tag/rust-v0.171.0).
+Qualification uses the official Linux binary and source commit
+`ccf9be8cc458bd6b8336fe84d68d8893f2691a5e`.
+
+## Changelog
+
+- Pin Rust 1.100.0 in local builds, CI, and the Docker builder. Continue to use
+  Mojo 1.2.0, the latest stable Mojo compiler.
+- Refresh Rust dependency requirements and resolve the newest compatible
+  workspace and fuzz lockfiles, including rusqlite 0.43.0, TOML 1.2.1, and Jiff
+  1.0.1.
+- Qualify RTK 1.2.1 and Playwright MCP 0.0.86 for the optional Super stack.
+
+Full Changelog: [0.170.0...0.171.0](https://github.com/christiandoxa/prodex/compare/0.170.0...0.171.0)
+
 ## 0.170.0 - 2026-11-18
 
 ### Runtime
@@ -11,68 +58,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Qualify Codex 0.170.0 source and lifecycle contracts (`c887792`)
-# Prodex 0.170.0
-
-Qualify Codex CLI 0.170.0 and preserve its immediate HTTP fallback for oversized
-Responses WebSocket requests through the Prodex runtime proxy.
-
-## New Features
-
-- Qualify the official Codex CLI 0.170.0 package and its generated stable
-  app-server lifecycle schemas, including versioned agent-message display
-  metadata and the required native RPC methods.
-
-## Bug Fixes
-
-- Forward an upstream WebSocket close code `1009` received before any text frame
-  to native Codex without spending another transport attempt or penalizing the
-  profile. Codex can immediately switch the request to HTTP.
-- Honor the upstream `x-codex-websocket-max-message-bytes` handshake limit against
-  the final serialized request before sending it. Oversized requests, including
-  prewarming, receive the same native fallback signal without an upstream
-  generation request. Invalid or absent limits preserve normal behavior.
-- Keep size closes after upstream text within the existing transport recovery
-  rules. Response commitment, continuation ownership, and configured proxy and
-  trust settings remain authoritative across transport changes.
-
-## Upstream Compatibility
-
-The qualified client is [Codex CLI 0.170.0](https://github.com/openai/codex/releases/tag/rust-v0.170.0),
-verified against source commit `29eb79e9866b3262a777fdf8195c1b9e63684c91` and the
-official native package.
-
-- Track upstream changes to realtime thread headers, saved model-facing ID
-  allocation, compaction replay, active recovery turns, permission profiles,
-  and experimental MCP environment identity in the compatibility baseline.
-- Preserve native ownership of realtime WebRTC negotiation, refreshable OTLP
-  headers, MCP OAuth cancellation safety, and sandbox permission normalization.
-  Native feature configuration and account/provider availability still apply.
-
-## Session and Provider Compatibility
-
-The existing managed and external-profile resume paths, `/resume`,
-`prodex resume`, `prodex s <uuid>`, and persistent `/goal` state remain covered
-by local native-client acceptance. Session repairs preserve transcript content
-and use the selected persistent home. GPT-6.2 Astra and Sol remain available in
-the Prodex catalog with their existing native context defaults.
-
-Proxy qualification covers HTTP/HTTPS CONNECT, SOCKS inference, authentication,
-custom certificate trust, and session continuation. Native Codex account discovery
-through a SOCKS-only listener remains outside the Prodex-owned inference path.
-Validation uses isolated profiles and local mock providers with synthetic
-credentials; it does not certify every live provider or account feature.
-
-Prodex remains a wrapper. Install the official Codex CLI separately to use the
-newly qualified native version.
-
-## Changelog
-
-- Validate committed native schema fixtures against their pinned hashes in the
-  default offline compatibility gate, with stale-fixture regression coverage.
-- Add WebSocket size-boundary checks and native-client acceptance for fresh and
-  UUID-resumed HTTP fallback while retaining the existing proxy and session tests.
-
-Full Changelog: [0.169.2...0.170.0](https://github.com/christiandoxa/prodex/compare/0.169.2...0.170.0)
 
 ## 0.169.2 - 2026-11-18
 
@@ -180,18 +165,3 @@ Full Changelog: [0.169.2...0.170.0](https://github.com/christiandoxa/prodex/comp
 ### Misc
 
 - Stream large legacy histories and bound startup reads (`f6e8647`)
-
-## 0.167.1 - 2026-11-08
-
-### Runtime
-
-- Preserve upstream proxy routing during account discovery (`5b70596`)
-
-### CLI
-
-- Preserve native OpenAI session identity (`0263c42`)
-
-### Misc
-
-- Flush retained backups with writable Windows handles (`db90906`)
-- Add bounded legacy OpenAI identity repair (`eb7cf48`)
