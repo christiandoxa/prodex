@@ -92,6 +92,11 @@ must not block that replay. This exception does not apply to opaque response IDs
 turn-state continuations, hosted providers, or gateway tenant traffic. Such
 continuations remain bound to their original provider and endpoint.
 
+For `--url` launches with a context window of at least 131,072 tokens, Codex and
+the local runtime proxy each default to 15 minutes of SSE idle time. An explicit
+Codex provider timeout or runtime proxy policy or environment setting takes
+precedence in its respective layer.
+
 The adapter emits an actual Responses reasoning item before summary deltas and
 closes it before answer/tool items. Plaintext reasoning survives tool-result and
 saved-session replay; encrypted hosted-provider reasoning is not decrypted or

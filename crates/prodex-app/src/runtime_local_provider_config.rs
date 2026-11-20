@@ -6,6 +6,7 @@ use crate::{
 use anyhow::{Context, Result};
 use prodex_cli::{
     SUPER_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_DEFAULT_CONTEXT_WINDOW, SUPER_DEFAULT_LOCAL_MODEL,
+    SUPER_LOCAL_PROVIDER_ID,
 };
 use prodex_mojo_core::super_provider_config::{
     RuntimeModelProviderClass, runtime_model_provider_class,
@@ -18,6 +19,11 @@ use std::path::Path;
 use std::{fs, path::PathBuf};
 
 const LOCAL_MODEL_CATALOG_FILE: &str = "prodex-local-model-catalog.json";
+
+pub(crate) fn local_long_context_stream_idle_timeout_ms(context_window: u64) -> Option<u64> {
+    // Long local prefills can take several minutes before the first SSE event.
+    (context_window >= 131_072).then_some(900_000)
+}
 
 pub(crate) fn prepare_local_provider_catalog_codex_args(
     codex_home: &Path,
@@ -48,11 +54,24 @@ fn local_provider_catalog_codex_args(
     user_args: &[OsString],
     write_catalog: bool,
 ) -> Result<Vec<OsString>> {
-    if !local_provider_enabled(codex_home, user_args)? {
+    let Some(provider) = codex_effective_config_value(codex_home, user_args, "model_provider")?
+    else {
+        return Ok(user_args.to_vec());
+    };
+    if runtime_model_provider_class(&provider)
+        .expect("runtime model-provider classification should accept Rust strings")
+        != Some(RuntimeModelProviderClass::Local)
+    {
         return Ok(user_args.to_vec());
     }
+    let mut local_args = user_args.to_vec();
+    if provider == SUPER_LOCAL_PROVIDER_ID
+        && let Some(override_arg) = local_codex_stream_idle_timeout_override(codex_home, user_args)?
+    {
+        local_args.splice(..0, ["-c".into(), override_arg]);
+    }
     if codex_cli_config_override_value(user_args, "model_catalog_json").is_some() {
-        return Ok(user_args.to_vec());
+        return Ok(local_args);
     }
 
     let model = local_model_for_launch(codex_home, user_args)?;
@@ -69,7 +88,6 @@ fn local_provider_catalog_codex_args(
         SUPER_DEFAULT_AUTO_COMPACT_LIMIT as u64,
     )?
     .min(context_window.saturating_sub(1));
-    let mut local_args = user_args.to_vec();
     if prodex_mojo_core::json::local_model_uses_chat_completions(&model)
         .map_err(|error| anyhow::anyhow!("local model protocol selection failed: {error:?}"))?
     {
@@ -123,16 +141,44 @@ fn local_provider_catalog_codex_args(
     Ok(args)
 }
 
-fn local_provider_enabled(codex_home: &Path, user_args: &[OsString]) -> Result<bool> {
-    Ok(
-        codex_effective_config_value(codex_home, user_args, "model_provider")?.is_some_and(
-            |provider| {
-                runtime_model_provider_class(&provider)
-                    .expect("runtime model-provider classification should accept Rust strings")
-                    == Some(RuntimeModelProviderClass::Local)
-            },
-        ),
-    )
+fn local_codex_stream_idle_timeout_override(
+    codex_home: &Path,
+    user_args: &[OsString],
+) -> Result<Option<OsString>> {
+    use crate::runtime_launch::{
+        runtime_launch_cli_model_context_window_tokens,
+        runtime_launch_config_model_context_window_tokens_with_profile_v2,
+    };
+    use codex_config::{
+        codex_cli_profile_v2_name, codex_config_file_toml_value, codex_profile_v2_config_path,
+    };
+
+    let key = "model_providers.prodex-local.stream_idle_timeout_ms";
+    if codex_cli_config_override_value(user_args, key).is_some() {
+        return Ok(None);
+    }
+    let profile = codex_cli_profile_v2_name(user_args);
+    let context_window = match runtime_launch_cli_model_context_window_tokens(user_args) {
+        Some(value) => Some(value),
+        None => runtime_launch_config_model_context_window_tokens_with_profile_v2(
+            codex_home,
+            profile.as_deref(),
+        )?,
+    };
+    let Some(timeout_ms) = context_window.and_then(local_long_context_stream_idle_timeout_ms)
+    else {
+        return Ok(None);
+    };
+    if let Some(profile_path) =
+        profile.and_then(|name| codex_profile_v2_config_path(codex_home, &name))
+        && codex_config_file_toml_value(&profile_path, key)?.is_some()
+    {
+        return Ok(None);
+    }
+    if codex_config_file_toml_value(&codex_home.join("config.toml"), key)?.is_some() {
+        return Ok(None);
+    }
+    Ok(Some(format!("{key}={timeout_ms}").into()))
 }
 
 fn local_model_for_launch(codex_home: &Path, user_args: &[OsString]) -> Result<String> {

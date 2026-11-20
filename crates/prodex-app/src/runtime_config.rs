@@ -30,8 +30,15 @@ impl RuntimeConfig {
     pub(crate) fn from_env_policy_and_cli(
         paths: &prodex_core::AppPaths,
     ) -> Result<Self, ConfigErrors> {
+        Self::from_env_policy_and_cli_with_stream_idle_default(paths, None)
+    }
+
+    pub(crate) fn from_env_policy_and_cli_with_stream_idle_default(
+        paths: &prodex_core::AppPaths,
+        stream_idle_timeout_default_ms: Option<u64>,
+    ) -> Result<Self, ConfigErrors> {
         let environment = RuntimeConfigEnvironment::read_process();
-        Self::from_environment(paths, environment)
+        Self::from_environment(paths, environment, stream_idle_timeout_default_ms)
     }
 
     pub(crate) fn force_http_response_transport(&self) -> bool {

@@ -29,6 +29,7 @@ impl runtime_config::RuntimeConfig {
     pub(super) fn from_environment(
         paths: &AppPaths,
         environment: runtime_config::RuntimeConfigEnvironment,
+        stream_idle_timeout_default_ms: Option<u64>,
     ) -> Result<Self, runtime_config::ConfigErrors> {
         let mut parser = runtime_config::RuntimeConfigParser::new(environment);
         let loaded_policy = match prodex_runtime_policy::load_runtime_policy_cached(&paths.root) {
@@ -57,6 +58,9 @@ impl runtime_config::RuntimeConfig {
             parsed
         });
         proxy_policy = proxy_policy.with_effective_preset(preset);
+        proxy_policy.stream_idle_timeout_ms = proxy_policy
+            .stream_idle_timeout_ms
+            .or(stream_idle_timeout_default_ms);
         let config = Self::parse(&mut parser, runtime_policy.as_ref(), &proxy_policy);
         if parser.errors.is_empty() {
             let config = runtime_config::RuntimeConfig {

@@ -31,6 +31,51 @@ fn local_proxy(
 }
 
 #[test]
+fn local_long_context_timeout_defaults_and_preserves_proxy_overrides() {
+    const KEY: &str = "PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS";
+    let _lock = crate::TestEnvVarGuard::lock();
+    let _unset = crate::TestEnvVarGuard::unset(KEY);
+    let paths = app_paths_for_root(temp_root("local-chat-long-context-timeout"));
+    let start = |paths: &crate::AppPaths, local, context| {
+        start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+            paths,
+            state: &AppState::default(),
+            upstream_base_url: "http://127.0.0.1:9/v1".to_string(),
+            provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+                api_keys: Vec::new(),
+                local,
+            },
+            upstream_no_proxy: true,
+            smart_context_enabled: true,
+            presidio_redaction_enabled: false,
+            model_context_window_tokens: Some(context),
+            preferred_listen_addr: Some("127.0.0.1:0"),
+        })
+        .unwrap()
+        .runtime_config
+        .tuning
+        .stream_idle_timeout_ms
+    };
+
+    assert_eq!(start(&paths, true, 212_992), 900_000);
+    let default = crate::core_constants::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS;
+    assert_eq!(start(&paths, true, 131_071), default);
+    assert_eq!(start(&paths, false, 212_992), default);
+    fs::remove_dir_all(paths.root).unwrap();
+
+    let paths = app_paths_for_root(temp_root("local-chat-explicit-timeout"));
+    fs::write(
+        paths.root.join("policy.toml"),
+        "version = 1\n[runtime_proxy]\nstream_idle_timeout_ms = 300000\n",
+    )
+    .unwrap();
+    assert_eq!(start(&paths, true, 212_992), 300_000);
+    let _explicit = crate::TestEnvVarGuard::set(KEY, "45000");
+    assert_eq!(start(&paths, true, 212_992), 45_000);
+    fs::remove_dir_all(paths.root).unwrap();
+}
+
+#[test]
 fn local_chat_transport_preserves_model_effort_tools_history_and_endpoint_prefix() {
     let paths = app_paths_for_root(temp_root("local-chat-roundtrip"));
     let upstream = TestUpstream::start_with_responses(vec![200], "application/json", CHAT);
