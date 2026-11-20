@@ -630,9 +630,9 @@ jobs:
             VERSION=v1.0.77 PREFIX="${HOME}/.local" bash "${RUNNER_TEMP}/copilot-install.sh"
           }
           install_claude() {
-            curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSLo "${RUNNER_TEMP}/claude-install.sh" https://claude.ai/install.sh
-            echo "3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944  ${RUNNER_TEMP}/claude-install.sh" | sha256sum --check --strict
-            bash "${RUNNER_TEMP}/claude-install.sh" 2.1.220
+            curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSLo "${RUNNER_TEMP}/claude-2.1.220" https://downloads.claude.ai/claude-code-releases/2.1.220/linux-x64/claude
+            echo "674f61f20ff306f3100cf9200e4c36c4b70278b5bef2884549819b942a89c863  ${RUNNER_TEMP}/claude-2.1.220" | sha256sum --check --strict
+            install -m 0755 "${RUNNER_TEMP}/claude-2.1.220" "${HOME}/.local/bin/claude"
           }
           pids=()
           clients=(gemini kiro copilot claude)

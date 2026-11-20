@@ -641,9 +641,9 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
     "npm install --global --ignore-scripts @google/gemini-cli@0.53.0",
     "a8bce4c6b740deb61009e3ad10995ec3027a51e6345025f1a2e5048ffdbf4b84",
     "00efcc2e196f0793d097935d6230062fc66e8247dc01334d2ac3eae4e26a1c7f",
-    "3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944",
+    "674f61f20ff306f3100cf9200e4c36c4b70278b5bef2884549819b942a89c863",
     "VERSION=v1.0.77",
-    "claude-install.sh\" 2.1.220",
+    "https://downloads.claude.ai/claude-code-releases/2.1.220/linux-x64/claude",
   ]) {
     if (!build.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release build pin missing ${marker}`);
