@@ -41,13 +41,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
-          key: mojo-static-v2-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.99.1-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
+          key: mojo-static-v2-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.100.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
 
       - name: Install Rust toolchain
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
           targets: x86_64-unknown-linux-gnu
 
       - name: Install pinned uv
@@ -140,7 +140,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -203,7 +203,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -264,7 +264,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7

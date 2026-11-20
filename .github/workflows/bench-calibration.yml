@@ -84,7 +84,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
-          key: mojo-static-v2-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.99.1-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
+          key: mojo-static-v2-${{ runner.os }}-x86_64-unknown-linux-gnu-x86-64-mojo-${{ env.MOJO_VERSION }}-rust1.100.0-${{ hashFiles('mojo/**/*.mojo', 'crates/prodex-mojo-core/build.rs', 'crates/prodex-mojo-core/build/*.rs', 'crates/prodex-mojo-core/Cargo.toml') }}
 
       - name: Validate cached benchmark Mojo archive
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit == 'true' }}
@@ -102,7 +102,7 @@ jobs:
         if: ${{ inputs.log_source == 'fresh-benchmark' }}
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
 
       - name: Install pinned uv
         if: ${{ inputs.log_source == 'fresh-benchmark' && steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
