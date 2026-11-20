@@ -7,6 +7,26 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Tolerate long-context inference prefill (`fc559d5`)
+# Prodex 0.171.1
+
+Keep long local inference requests open while the model processes the prompt.
+
+## New Features
+
+- Local `prodex s --url` launches with at least 131,072 context tokens now allow
+  15 minutes of SSE idle time.
+
+## Bug Fixes
+
+- Prevent reconnects at the five-minute mark during long local prefills by
+  extending the idle timeout in both Codex and the Prodex runtime proxy.
+
+## Changelog
+
+- Preserve explicit provider timeouts and runtime proxy policy or environment
+  overrides.
+
+Full Changelog: [0.171.0...0.171.1](https://github.com/christiandoxa/prodex/compare/0.171.0...0.171.1)
 
 ## 0.171.0 - 2026-11-20
 
