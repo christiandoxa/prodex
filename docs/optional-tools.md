@@ -57,8 +57,8 @@ are created in the temporary overlay. Presidio still asks for consent before
 an interactive launch; `--presidio` and `--no-presidio` keep their existing
 non-interactive meanings. `--tool` adds to the automatic set, not replaces it.
 
-The current release-qualified references are RTK 1.2.0, Codebase Memory MCP
-0.12.1, Playwright MCP 0.0.85, Ponytail 5.3.3, and Presidio 2.2.366. The freshness
+The current release-qualified references are RTK 1.2.1, Codebase Memory MCP
+0.12.1, Playwright MCP 0.0.86, Ponytail 5.3.3, and Presidio 2.2.366. The freshness
 gate verifies upstream GitHub releases and the applicable npm/PyPI metadata.
 Qualification does not automatically replace running tools or services.
 
@@ -85,7 +85,7 @@ Ponytail uses a versioned manifest/tree contract, accepts stable 4.9.0 or newer,
 
 The 5.3.3 and previously qualified 5.3.2 references require their exact audited commits and complete tree digests. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
 
-RTK requires `0.46.0` or newer; `1.2.0` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
+RTK requires `0.46.0` or newer; `1.2.1` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
 `0.12.1` is the latest stable release validated for this Prodex release. Both resolve from
 managed roots first and then `PATH`.
 The README installs the current stable Codebase Memory MCP `0.12.1`; Prodex
@@ -102,7 +102,7 @@ Kiro launches retain that shared server but add `check_index_coverage` to the
 server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
 Schema composition; all other Codebase Memory tools remain available.
 Both ordinary launch and required-tool checks verify the Node runtime before
-probing the installed Playwright package. Playwright MCP requires validated Node.js 18+, `npx`, and Playwright MCP `0.0.79` or newer. Prodex invokes `npx --prefer-offline --no-install @playwright/mcp`, prefers cached package metadata without refreshing it, probes the installed version, and rejects an installed version below the minimum. `0.0.85` is the current latest-stable release-qualified reference. A cold or incomplete npm cache may still need registry access; no package is installed automatically during launch.
+probing the installed Playwright package. Playwright MCP requires `npx` and a supported package. Versions `0.0.79` through `0.0.85` can use Node.js 18+, and the release-qualified `0.0.86` requires Node.js 20+. Prodex invokes `npx --prefer-offline --no-install @playwright/mcp`, prefers cached package metadata without refreshing it, probes the installed version, and rejects an installed version below the minimum. `0.0.86` is the current latest-stable release-qualified reference. A cold or incomplete npm cache may still need registry access; no package is installed automatically during launch.
 Presidio remains a consent-controlled service selection and uses the existing
 launch/expose health checks. Prodex accepts official Presidio analyzer/anonymizer images at `2.2.364` or newer; the release-qualified defaults remain digest-pinned, while newer official images can be supplied with `PRODEX_PRESIDIO_ANALYZER_IMAGE` and `PRODEX_PRESIDIO_ANONYMIZER_IMAGE`. `--require-tool presidio` additionally requires healthy services
 and `fail_mode = "closed"`, so an inspection failure cannot silently bypass

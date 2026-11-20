@@ -4,8 +4,9 @@ use crate::discovery::{
 use anyhow::{Context, Result};
 use prodex_mojo_core::optional_tools_policy::{
     CAP_BROWSER_AUTOMATION, CAP_REDACTION, CAP_SHELL_COMPRESSION, CAP_SIMPLICITY_REVIEW,
-    CAP_STRUCTURAL_NAVIGATION, OptionalToolPolicyId, OptionalToolPolicyKind, optional_tool_class,
-    optional_tool_descriptor_policy, optional_tool_hex_encode,
+    CAP_STRUCTURAL_NAVIGATION, OptionalToolPolicyId, OptionalToolPolicyKind,
+    OptionalToolProbeVersion, optional_tool_class, optional_tool_descriptor_policy,
+    optional_tool_hex_encode, optional_tool_probe_version,
 };
 use prodex_mojo_core::rich::ascii_casefold_contains;
 use sha2::{Digest, Sha256};
@@ -432,9 +433,9 @@ fn playwright_tool_status() -> ToolHealth {
         .split('.')
         .next()
         .and_then(|value| value.parse::<u64>().ok());
-    if !major.is_some_and(|major| major >= 18) {
+    let Some(major) = major.filter(|major| *major >= 18) else {
         return ToolHealth::missing(id, format!("Node.js 18+ is required; found {node_version}"));
-    }
+    };
     let Some(npx) = find_path_command("npx") else {
         return ToolHealth::missing(id, "npx was not found on PATH");
     };
@@ -444,7 +445,24 @@ fn playwright_tool_status() -> ToolHealth {
         ToolDiscoverySource::Path,
         &PLAYWRIGHT_MCP_PROBE_ARGS,
     ) {
-        Ok(tool) => ToolHealth::installed(tool),
+        Ok(tool) => {
+            if major < 20
+                && let Some(version) = tool.version.as_deref()
+                && matches!(
+                    optional_tool_probe_version(version, "0.0.86")
+                        .expect("validated Playwright MCP version can be compared"),
+                    OptionalToolProbeVersion::Supported(_)
+                )
+            {
+                return invalid_tool(
+                    id,
+                    anyhow::anyhow!(
+                        "Playwright MCP {version} requires Node.js 20+; found {node_version}"
+                    ),
+                );
+            }
+            ToolHealth::installed(tool)
+        }
         Err(error) => playwright_probe_failure(error),
     }
 }
@@ -459,7 +477,7 @@ pub(super) fn playwright_probe_failure(error: anyhow::Error) -> ToolHealth {
     ToolHealth::missing(
         OptionalToolId::PlaywrightMcp,
         format!(
-            "Playwright MCP is not installed or is currently unavailable; install/update @playwright/mcp {} or newer (latest stable reference: {})",
+            "Playwright MCP is not installed or is currently unavailable; install/update @playwright/mcp {} or newer (latest stable reference: {}, requires Node.js 20+)",
             crate::PLAYWRIGHT_MCP_MINIMUM_SUPPORTED_VERSION,
             crate::PLAYWRIGHT_MCP_LATEST_STABLE_REFERENCE,
         ),

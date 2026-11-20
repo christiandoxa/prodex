@@ -142,7 +142,7 @@ mod managed_probe_tests {
             assert_eq!(plan.activations.len(), usize::from(expected == "ready"));
             if expected != "ready" {
                 assert_eq!(plan.unavailable.len(), 1);
-                assert!(plan.unavailable[0].detail.contains("Node.js 18+"));
+                assert!(plan.unavailable[0].detail.contains(expected.as_str()));
             }
             return;
         }
@@ -152,7 +152,7 @@ mod managed_probe_tests {
         let npx = root.join("npx");
         fs::write(
             &npx,
-            "#!/bin/sh\n: > \"$0.executed\"\n[ \"$*\" = \"--prefer-offline --no-install @playwright/mcp --version\" ] || exit 42\nprintf 'Version 0.0.83\\n'\n",
+            "#!/bin/sh\n: > \"$0.executed\"\n[ \"$*\" = \"--prefer-offline --no-install @playwright/mcp --version\" ] || exit 42\nprintf 'Version %s\\n' \"$TEST_PLAYWRIGHT_VERSION\"\n",
         )
         .unwrap();
         fs::set_permissions(&npx, fs::Permissions::from_mode(0o700)).unwrap();
@@ -162,12 +162,18 @@ mod managed_probe_tests {
         );
         let test = test.split_once("::").unwrap().1;
         let mut outcomes = Vec::new();
-        for (version, expected) in [("v17.9.1", "unavailable"), ("v18.0.0", "ready")] {
-            fs::write(&node, format!("#!/bin/sh\nprintf '{version}\\n'\n")).unwrap();
+        for (node_version, package_version, expected, should_probe) in [
+            ("v17.9.1", "0.0.83", "Node.js 18+", false),
+            ("v18.0.0", "0.0.83", "ready", true),
+            ("v18.0.0", "0.0.86", "Node.js 20+", true),
+            ("v20.0.0", "0.0.86", "ready", true),
+        ] {
+            fs::write(&node, format!("#!/bin/sh\nprintf '{node_version}\\n'\n")).unwrap();
             fs::set_permissions(&node, fs::Permissions::from_mode(0o700)).unwrap();
             let result = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", test, "--test-threads=1"])
                 .env(CHILD, expected)
+                .env("TEST_PLAYWRIGHT_VERSION", package_version)
                 .env("PATH", &root)
                 .env("HOME", &root)
                 .env("USERPROFILE", &root)
@@ -179,17 +185,17 @@ mod managed_probe_tests {
             if probed {
                 fs::remove_file(root.join("npx.executed")).unwrap();
             }
-            outcomes.push((result, probed, expected));
+            outcomes.push((result, probed, should_probe));
         }
         fs::remove_dir_all(root).unwrap();
-        for (result, probed, expected) in outcomes {
+        for (result, probed, should_probe) in outcomes {
             assert!(
                 result.status.success(),
                 "{}\n{}",
                 String::from_utf8_lossy(&result.stdout),
                 String::from_utf8_lossy(&result.stderr)
             );
-            assert_eq!(probed, expected == "ready");
+            assert_eq!(probed, should_probe);
         }
     }
 }

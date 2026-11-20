@@ -54,7 +54,7 @@ For OpenAI/Codex quota-aware routing, you need at least one logged-in Prodex pro
 |---|---|
 | Codex CLI | `prodex`, `prodex run`, `prodex super` |
 | RTK | external `rtk`, or the Super `--tool rtk` option |
-| Node.js 18+ with `npx` | Playwright MCP when selected by Super |
+| Node.js 20+ with `npx` | Current Playwright MCP when selected by Super |
 
 </details>
 
@@ -199,7 +199,7 @@ The four installed, compatible coding tools are selected automatically; Presidio
 <details>
 <summary>Install and verify the Super tools</summary>
 
-RTK (latest stable `1.2.0`, externally managed):
+RTK (latest stable `1.2.1`, externally managed):
 
 ```bash
 brew install rtk
@@ -207,9 +207,9 @@ brew install rtk
 rtk_dir="$(mktemp -d)"
 trap 'rm -rf "$rtk_dir"' EXIT
 curl -fsSLo "$rtk_dir/checksums.txt" \
-  https://github.com/rtk-ai/rtk/releases/download/v1.2.0/checksums.txt
+  https://github.com/rtk-ai/rtk/releases/download/v1.2.1/checksums.txt
 curl -fsSLo "$rtk_dir/rtk-x86_64-unknown-linux-musl.tar.gz" \
-  https://github.com/rtk-ai/rtk/releases/download/v1.2.0/rtk-x86_64-unknown-linux-musl.tar.gz
+  https://github.com/rtk-ai/rtk/releases/download/v1.2.1/rtk-x86_64-unknown-linux-musl.tar.gz
 (cd "$rtk_dir" && grep '  rtk-x86_64-unknown-linux-musl.tar.gz$' checksums.txt | sha256sum --check)
 tar -xzf "$rtk_dir/rtk-x86_64-unknown-linux-musl.tar.gz" -C "$rtk_dir"
 install -m 0755 "$rtk_dir/rtk" "$HOME/.local/bin/rtk"
@@ -221,7 +221,7 @@ prodex doctor --install
 
 The full RTK distribution includes a BUSL-1.1 engine; the separately published
 `rtk-oss` edition is Apache-2.0-only. Choose the distribution deliberately.
-Use the matching archive and checksum row from the official v1.2.0 release on
+Use the matching archive and checksum row from the official v1.2.1 release on
 other architectures. Finish any process using the old executable before an
 explicit upgrade; Prodex never replaces RTK during startup.
 
@@ -246,12 +246,12 @@ heavy indexing work are skipped unless updated. Prodex leaves `CBM_CACHE_DIR` un
 sub-agent sessions join the account-wide canonical daemon; an explicit user override is inherited
 unchanged and must stay consistent across every CBM client.
 
-Playwright MCP (minimum supported `0.0.79`; current latest-stable reference `0.0.83`):
+Playwright MCP (minimum supported `0.0.79`; current latest-stable reference `0.0.86`, requires Node.js 20+):
 
 ```bash
 node --version
 npx --version
-npm install -g @playwright/mcp@0.0.83
+npm install -g @playwright/mcp@0.0.86
 npx --no-install @playwright/mcp install-browser chrome
 npx --no-install @playwright/mcp --version
 prodex doctor --install
@@ -693,7 +693,13 @@ prodex update
 ```bash
 prodex run 00000000-0000-7000-8000-000000000042
 printf 'context from stdin' | prodex run exec "summarize this"
+prodex run exec --remote ws://127.0.0.1:4500 --json "summarize this"
 ```
+
+With Codex 0.171.0 or newer, `exec --remote` connects to an existing Codex
+app server. Use `exec resume <thread-id> --remote <address>` to continue a
+thread on that server. Configure credentials, providers, and permissions on
+the server.
 
 Unknown top-level Codex subcommands remain managed Codex launches.
 
