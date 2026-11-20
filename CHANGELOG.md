@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.171.1 - 2026-11-20
+
+### Misc
+
+- Tolerate long-context inference prefill (`fc559d5`)
+
 ## 0.171.0 - 2026-11-20
 
 ### Claude
@@ -11,43 +17,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Qualify Codex 0.171.0 and pass through remote exec (`30cd378`)
-# Prodex 0.171.0
-
-Qualify Codex CLI 0.171.0 and update the Rust compiler and locked dependencies.
-
-## New Features
-
-- Use `prodex run exec --remote <address>` to start a noninteractive turn on an
-  existing Codex app server. Use `exec resume <thread-id> --remote <address>` to
-  continue a server-owned thread. Codex handles the connection and authentication.
-- Qualify the native 0.171.0 lifecycle schemas, including scoped MCP status and
-  the provider-default RPC. GPT-6.2 Sol and Astra, workspace previews, and the
-  custom status line remain available through native Codex configuration.
-
-## Bug Fixes
-
-- Keep local profile selection, quota preflight, session repair, and proxy
-  overrides out of remote noninteractive launches. The existing app server owns
-  the thread, provider credentials, and permissions.
-- Report the Node.js 20+ requirement for Playwright MCP 0.0.86. Older compatible
-  Playwright MCP packages can still use Node.js 18+.
-
-## Upstream Compatibility
-
-The standalone wrapper uses a separately installed [Codex CLI 0.171.0](https://github.com/openai/codex/releases/tag/rust-v0.171.0).
-Qualification uses the official Linux binary and source commit
-`ccf9be8cc458bd6b8336fe84d68d8893f2691a5e`.
-
-## Changelog
-
-- Pin Rust 1.100.0 in local builds, CI, and the Docker builder. Continue to use
-  Mojo 1.2.0, the latest stable Mojo compiler.
-- Refresh Rust dependency requirements and resolve the newest compatible
-  workspace and fuzz lockfiles, including rusqlite 0.43.0, TOML 1.2.1, and Jiff
-  1.0.1.
-- Qualify RTK 1.2.1 and Playwright MCP 0.0.86 for the optional Super stack.
-
-Full Changelog: [0.170.0...0.171.0](https://github.com/christiandoxa/prodex/compare/0.170.0...0.171.0)
 
 ## 0.170.0 - 2026-11-18
 
@@ -159,9 +128,3 @@ Full Changelog: [0.170.0...0.171.0](https://github.com/christiandoxa/prodex/comp
 ### Misc
 
 - Preserve model selection and support Offrail coding tools (`cf22e35`)
-
-## 0.167.2 - 2026-11-08
-
-### Misc
-
-- Stream large legacy histories and bound startup reads (`f6e8647`)
