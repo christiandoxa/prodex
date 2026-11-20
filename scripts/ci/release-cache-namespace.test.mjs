@@ -34,7 +34,7 @@ function identity(file, overrides = {}) {
 test("production release uses the discriminated shared key, never an ignored additional key", () => {
   for (const file of workflows) {
     const block = cache(file);
-    assert.match(block, /shared-key: production-release-deps-v2-rust1\.99\.1-thinlto-cgu/);
+    assert.match(block, /shared-key: production-release-deps-v2-rust1\.100\.0-thinlto-cgu/);
     assert.doesNotMatch(block, /^          key:/mu, `${file}: additional key would be ignored`);
     assert.match(block, /cache-workspace-crates: "false"/);
     assert.match(block, /outputs.external_sha256/);
