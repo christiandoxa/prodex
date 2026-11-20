@@ -489,7 +489,7 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
             .len();
     summary.persisted_turn_state_coverage_percent =
         std::num::NonZeroUsize::new(merged_response_bindings).map(|divisor| {
-            ((merged_continuations.turn_state_bindings.len() * 100) / divisor.get()).min(100) as u8
+            ((merged_continuations.turn_state_bindings.len() * 100) / divisor).min(100) as u8
         });
     summary.continuation_journal_saved_at =
         (continuation_journal.value.saved_at > 0).then_some(continuation_journal.value.saved_at);

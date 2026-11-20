@@ -281,6 +281,11 @@ fn shared_codex_dynamic_file_name_caller_uses_mojo_policy() {
 }
 
 #[cfg(unix)]
+fn session_mtime(path: &Path) -> FileTime {
+    FileTime::from(fs::metadata(path).unwrap().modified().unwrap())
+}
+
+#[cfg(unix)]
 #[test]
 fn prepare_managed_codex_home_restores_session_mtime_from_last_timestamp() {
     let temp_dir = PrepareTestDir::new("session-mtime");
@@ -304,14 +309,12 @@ fn prepare_managed_codex_home_restores_session_mtime_from_last_timestamp() {
         ),
     )
     .expect("session file should write");
-    filetime::set_file_mtime(&session_file, stale_mtime).expect("session mtime should update");
+    let times = fs::FileTimes::new().set_modified(stale_mtime.into());
+    fs::set_times(&session_file, times).unwrap();
 
     prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
 
-    let restored_mtime = FileTime::from_last_modification_time(
-        &fs::metadata(&session_file).expect("session metadata should read"),
-    );
-    assert_eq!(restored_mtime, expected_mtime);
+    assert_eq!(session_mtime(&session_file), expected_mtime);
 }
 
 #[cfg(unix)]
@@ -348,10 +351,8 @@ fn prepare_managed_codex_home_only_reprocesses_changed_sessions() {
         .expect("session should append");
     prepare_managed_codex_home(&paths, &codex_home).expect("changed prepare should succeed");
 
-    let restored_mtime = FileTime::from_last_modification_time(
-        &fs::metadata(&session_file).expect("session metadata should read"),
-    );
-    assert_eq!(restored_mtime, FileTime::from_unix_time(1_782_029_100, 0));
+    let expected_mtime = FileTime::from_unix_time(1_782_029_100, 0);
+    assert_eq!(session_mtime(&session_file), expected_mtime);
 }
 
 #[cfg(unix)]
@@ -809,18 +810,17 @@ fn prepare_managed_codex_home_detects_same_size_same_mtime_replacement() {
     assert_eq!(first.len(), second.len());
     fs::write(&session_file, first).expect("first session should write");
     prepare_managed_codex_home(&paths, &codex_home).expect("first prepare should succeed");
-    let cached_mtime = FileTime::from_last_modification_time(
-        &fs::metadata(&session_file).expect("first metadata should read"),
-    );
+    let cached_mtime = session_mtime(&session_file);
 
     fs::write(&session_file, second).expect("replacement session should write");
-    filetime::set_file_mtime(&session_file, cached_mtime).expect("mtime should match cache");
+    let times = fs::FileTimes::new().set_modified(cached_mtime.into());
+    fs::set_times(&session_file, times).unwrap();
     prepare_managed_codex_home(&paths, &codex_home).expect("replacement should be detected");
 
-    let restored_mtime = FileTime::from_last_modification_time(
-        &fs::metadata(&session_file).expect("replacement metadata should read"),
+    assert_eq!(
+        session_mtime(&session_file),
+        FileTime::from_unix_time(1_782_032_400, 0)
     );
-    assert_eq!(restored_mtime, FileTime::from_unix_time(1_782_032_400, 0));
 }
 
 #[cfg(unix)]

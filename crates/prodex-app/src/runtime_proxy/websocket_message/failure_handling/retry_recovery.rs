@@ -10,15 +10,13 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         &mut self,
         profile_name: &str,
     ) -> Result<bool> {
-        if !runtime_proxy_crate::runtime_full_context_retry_signal_eligible(
-            self.previous_response_id.is_some(),
-            self.request_session_id.is_some(),
-            self.bound_profile.as_deref() == Some(profile_name),
-        ) || !self.prepare_full_context_fallback(profile_name)?
-        {
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(
+            runtime_proxy_crate::runtime_full_context_retry_signal_eligible(
+                self.previous_response_id.is_some(),
+                self.request_session_id.is_some(),
+                self.bound_profile.as_deref() == Some(profile_name),
+            ) && self.prepare_full_context_fallback(profile_name)?,
+        )
     }
 
     pub(super) fn try_rotate_quota_turn_state_full_context(

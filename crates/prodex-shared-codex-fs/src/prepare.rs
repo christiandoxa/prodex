@@ -575,14 +575,11 @@ fn restore_codex_session_file_modified_time(session_file: &Path, contents: &str)
     let Some(timestamp) = last_session_event_timestamp(contents) else {
         return Ok(());
     };
-    let metadata = fs::metadata(session_file)
-        .with_context(|| format!("failed to inspect {}", session_file.display()))?;
     let modified_time =
         FileTime::from_unix_time(timestamp.timestamp(), timestamp.timestamp_subsec_nanos());
-    filetime::set_file_times(
+    fs::set_times(
         session_file,
-        FileTime::from_last_access_time(&metadata),
-        modified_time,
+        fs::FileTimes::new().set_modified(modified_time.into()),
     )
     .with_context(|| {
         format!(

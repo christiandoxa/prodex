@@ -1,5 +1,4 @@
 use super::*;
-use filetime::FileTime;
 use std::ffi::OsString;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -106,10 +105,11 @@ pub(super) fn copy_shared_codex_file_replacing_existing(
     replace_shared_codex_file_atomic(
         destination,
         source_metadata.permissions(),
-        Some((
-            FileTime::from_last_access_time(&source_metadata),
-            FileTime::from_last_modification_time(&source_metadata),
-        )),
+        Some(
+            fs::FileTimes::new()
+                .set_accessed(source_metadata.accessed()?)
+                .set_modified(source_metadata.modified()?),
+        ),
         context,
         |destination_file| {
             io::copy(&mut source_file, destination_file)?;
@@ -128,7 +128,7 @@ pub(super) fn copy_shared_codex_file_replacing_existing(
 pub(super) fn replace_shared_codex_file_atomic<F>(
     destination: &Path,
     permissions: fs::Permissions,
-    times: Option<(FileTime, FileTime)>,
+    times: Option<fs::FileTimes>,
     context: &str,
     write: F,
 ) -> Result<()>
@@ -154,14 +154,13 @@ where
         temporary_file
             .set_permissions(permissions)
             .with_context(|| format!("failed to preserve mode for {}", destination.display()))?;
-        if let Some((accessed, modified)) = times {
-            filetime::set_file_handle_times(&temporary_file, Some(accessed), Some(modified))
-                .with_context(|| {
-                    format!(
-                        "failed to preserve modified time for copied file {}",
-                        destination.display()
-                    )
-                })?;
+        if let Some(times) = times {
+            temporary_file.set_times(times).with_context(|| {
+                format!(
+                    "failed to preserve modified time for copied file {}",
+                    destination.display()
+                )
+            })?;
         }
         temporary_file
             .sync_all()

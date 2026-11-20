@@ -47,7 +47,7 @@ test("no release target has a permanent skipped smoke job or compile-only fallba
 });
 test("cross driver cache is version/host pinned and validates the restored executable", () => {
   assert.match(step("Cache pinned cross tool"), /github.ref == 'refs\/heads\/main'/);
-  assert.match(step("Cache pinned cross tool"), /key: prodex-cross-tool-v1-0.2.5-rust1.100.0-.*runner.os.*runner.arch/);
+  assert.match(step("Cache pinned cross tool"), /key: prodex-cross-tool-v1-0\.2\.5-rust1\.100\.0-.*runner.os.*runner.arch/);
   assert.doesNotMatch(step("Cache pinned cross tool"), /restore-keys:/);
   const install = shell("Install cross");
   assert.match(install, /cargo install cross --version 0.2.5 --locked --root/);

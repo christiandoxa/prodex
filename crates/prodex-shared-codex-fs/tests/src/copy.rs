@@ -75,12 +75,19 @@ fn copy_directory_contents_preserves_source_file_modified_time() {
     fs::create_dir_all(source_file.parent().expect("source parent"))
         .expect("source parent should be created");
     fs::write(&source_file, "session").expect("source file should write");
-    filetime::set_file_mtime(&source_file, source_mtime).expect("source mtime should update");
+    fs::set_times(
+        &source_file,
+        fs::FileTimes::new().set_modified(source_mtime.into()),
+    )
+    .expect("source mtime should update");
 
     copy_directory_contents(&source, &destination).expect("copy should succeed");
 
-    let destination_mtime = FileTime::from_last_modification_time(
-        &fs::metadata(&destination_file).expect("destination metadata should read"),
+    let destination_mtime = FileTime::from(
+        fs::metadata(&destination_file)
+            .expect("destination metadata should read")
+            .modified()
+            .expect("mtime should be readable"),
     );
     assert_eq!(destination_mtime, source_mtime);
 }

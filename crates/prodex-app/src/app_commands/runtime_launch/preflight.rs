@@ -305,11 +305,7 @@ fn try_runtime_launch_snapshot_preflight(
 
     let current_usage = runtime_launch_usage_from_snapshot(current_snapshot);
     let current_blocked = runtime_launch_blocked_limits_for_request(&current_usage, request);
-    if current_blocked.is_empty() {
-        return Ok(true);
-    }
-
-    Ok(false)
+    Ok(current_blocked.is_empty())
 }
 
 fn try_runtime_launch_auto_snapshot_preflight(

@@ -6,7 +6,7 @@ description = "Multi-provider Codex wrapper with OpenAI quota-aware routing and 
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/christiandoxa/prodex"
-rust-version = "1.100.0"
+rust-version.workspace = true
 
 [workspace]
 members = [
@@ -72,18 +72,18 @@ httpdate = "1.0.3"
 aes-gcm-siv = "0.12.1"
 anyhow = "1.0.104"
 argon2 = "0.6.0"
-arc-swap = "1.9.3"
+arc-swap = "1.9.5"
 base64 = "0.23.1"
 aws-lc-rs = "1.19.0"
-bytes = "1.12.1"
+bytes = "1.12.2"
 # Host compatibility alias: Jiff-backed implementation; registry Chrono is removed.
 chrono = { package = "prodex-time", path = "crates/prodex-time", version = "0.170.0" }
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.9", features = ["derive"] }
 codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config", version = "0.170.0" }
 deadpool-postgres = "=0.14.2"
 dirs = "7.0.0"
 fs2 = "0.4.3"
-filetime = "0.2.29"
+filetime = "0.2.30"
 getrandom = "0.4.3"
 http-body-util = "0.1.5"
 hyper = "1.12.0"
@@ -132,11 +132,11 @@ prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex
 redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.170.0" }
 percent-encoding = "2.3.2"
 reqwest = { version = "0.13.5", default-features = false }
-rpassword = "7.5.4"
+rpassword = "7.5.5"
 crossterm = "0.29.0"
-rusqlite = { version = "0.42.0", features = ["bundled"] }
+rusqlite = { version = "0.43.0", features = ["bundled"] }
 postgres = "0.19.14"
-redis = { version = "1.8.1", default-features = false }
+redis = { version = "1.8.2", default-features = false }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-native-certs = "0.8.5"
 tokio-rustls = "0.26.6"
@@ -154,12 +154,12 @@ tiny_http = "0.12.0"
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tokio-postgres = "=0.7.18"
 tokio-postgres-rustls = { version = "0.14.0", features = ["aws-lc-rs"] }
-toml = "1.1.8"
+toml = "1.2.1"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
-uuid = { version = "1.29.0", features = ["serde", "v7"] }
+uuid = { version = "1.29.3", features = ["serde", "v7"] }
 url = "2.5.8"
-zeroize = "1.9.1"
-zstd = "0.14.3"
+zeroize = "1.9.2"
+zstd = "0.14.4"
 
 [features]
 default = []

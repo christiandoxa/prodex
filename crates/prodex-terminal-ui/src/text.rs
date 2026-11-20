@@ -107,11 +107,10 @@ pub fn wrap_text(input: &str, width: usize) -> Vec<String> {
         .into_iter()
         .map(|line| {
             let mut output = String::new();
-            for token_index in line.start..line.end {
-                if token_index > line.start {
+            for (index, token) in plan.token_ranges[line.start..line.end].iter().enumerate() {
+                if index > 0 {
                     output.push(' ');
                 }
-                let token = plan.token_ranges[token_index];
                 output.push_str(&input[byte_ends[token.start]..byte_ends[token.end]]);
             }
             output
