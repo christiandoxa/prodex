@@ -138,6 +138,44 @@ fn run_exec_preserves_prompt_and_piped_stdin() {
 }
 
 #[test]
+fn run_exec_remote_keeps_the_server_in_control() {
+    let fixture = setup_fixture();
+    let args = [
+        "exec",
+        "resume",
+        "--remote=ws://127.0.0.1:12345",
+        "--remote-auth-token-env",
+        "TEST_REMOTE_TOKEN",
+        "00000000-0000-4000-8000-000000000001",
+        "--json",
+        "continue remotely",
+    ];
+    let output = run_prodex_with_env(
+        &fixture,
+        &[&["run"], args.as_slice()].concat(),
+        &[(
+            "TEST_CODEX_ARGS_LOG",
+            fixture.codex_args_log.to_str().unwrap(),
+        )],
+    );
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.codex_args_log)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        args
+    );
+    assert_eq!(fixture.usage_server.max_concurrent_requests(), 0);
+    assert_eq!(active_profile(&fixture.prodex_home), "main");
+}
+
+#[test]
 fn explicit_profile_can_disable_auto_rotate() {
     let fixture = setup_fixture();
 

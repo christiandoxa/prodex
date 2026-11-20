@@ -321,9 +321,9 @@ const REQUIRED_FILE_CONTAINS = {
     "remaining = 0",
     "CodexErrorDetails::ResponseIncomplete(incomplete)",
     "CompactionRequestKind::Background(_)",
-    "record_rollout_budget_usage(&turn_context.sub_id, usage)",
+    "record_rollout_budget_usage(&turn_context.sub_id, &usage)",
     "sess.record_incomplete_response_usage(",
-    "match event?",
+    "let Some(SamplingEvent { event, hook_output }) = event else",
   ],
   "codex-rs/core/src/compact_remote_v2_attempt.rs": [
     "step_context.incremental_tools_feature().is_some()",
@@ -898,6 +898,8 @@ const REQUIRED_FILE_CONTAINS = {
     "prune_schema_compositions",
   ],
   "codex-rs/exec/src/cli.rs": [
+    "id = \"exec_remote\"",
+    "pub remote_auth_token_env: Option<String>",
     "ThreadSource",
     "long = \"thread-source\"",
     "value_name = \"SOURCE\"",
@@ -912,6 +914,7 @@ const REQUIRED_FILE_CONTAINS = {
     "#[value(rename_all = \"snake_case\")]",
   ],
   "codex-rs/exec/src/lib.rs": [
+    "return remote::run(cli, endpoint).await;",
     "ThreadSource::User",
     "ThreadForkParams",
     "thread_start_params_from_config",
@@ -1325,7 +1328,7 @@ const REQUIRED_FILE_CONTAINS = {
     ".filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))",
     "step_context.tool_router.model_visible_specs()",
     ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
-    "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
+    "if tool_cancellation.is_cancelled() && !response_completed && can_interrupt",
     "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
     "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })",
   ],
@@ -1384,7 +1387,7 @@ const REQUIRED_FILE_CONTAINS = {
     "fn update_mcp_startup_status",
     "self.mcp_startup_status.is_none() && !matches!(status, McpStartupStatus::Starting)",
     "let current = self.mcp_startup_status.as_ref()?",
-    "let first = starting.first()?",
+    "let first = to_show.first()?",
     "self.finish_mcp_startup();"
   ],
 };
@@ -1465,6 +1468,7 @@ const REQUIRED_APP_SERVER_METHODS = [
   "thread/queue/changed",
   "turn/start",
   "turn/interrupt",
+  "modelProvider/default/set",
   "mcpServer/event/stream/start",
   "mcpServer/event/stream/stop",
 ];
@@ -2933,9 +2937,9 @@ const REQUIRED_SEMANTIC_CHECKS = [
     "file_contains_all": [
       "CodexErrorDetails::ResponseIncomplete(incomplete)",
       "CompactionRequestKind::Background(_)",
-      "record_rollout_budget_usage(&turn_context.sub_id, usage)",
+      "record_rollout_budget_usage(&turn_context.sub_id, &usage)",
       "sess.record_incomplete_response_usage(",
-      "match event?"
+      "let Some(SamplingEvent { event, hook_output }) = event else"
     ]
   },
   {
@@ -3331,7 +3335,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     "file": "codex-rs/core/src/session/turn.rs",
     "file_contains_all": [
       ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
-      "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
+      "if tool_cancellation.is_cancelled() && !response_completed && can_interrupt",
       "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
       "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })"
     ]
@@ -3471,7 +3475,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "fn update_mcp_startup_status",
       "self.mcp_startup_status.is_none() && !matches!(status, McpStartupStatus::Starting)",
       "let current = self.mcp_startup_status.as_ref()?",
-      "let first = starting.first()?",
+      "let first = to_show.first()?",
       "self.finish_mcp_startup();"
     ]
   },

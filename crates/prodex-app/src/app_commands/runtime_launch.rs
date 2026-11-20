@@ -11,9 +11,7 @@ mod run_command_strategy;
 mod selection;
 mod session_delete;
 mod usage_limit_recovery;
-use command_server::{
-    RunLaunchRoute, execute_codex_command_server_managed_runtime, run_launch_route,
-};
+pub(crate) use command_server::handle_run;
 use goal_resume::*;
 pub(super) use resume_provider::runtime_resume_provider_from_codex_args;
 use resume_provider::*;
@@ -41,29 +39,6 @@ pub(crate) use usage_limit_recovery::{
     wait_for_runtime_recovery_round,
 };
 use {preflight::*, provider_names::*, providers::*, resume_repair::*};
-pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
-    if let Some(base_url) = args.base_url.as_deref() {
-        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
-    }
-    let route = run_launch_route(&args);
-    let strategy = RunCommandStrategy::new(args)?;
-    if strategy.dry_run {
-        return print_runtime_launch_dry_run(
-            "run",
-            strategy.runtime_request(),
-            RuntimeLaunchDryRunChild::Codex {
-                codex_args: strategy.codex_args.clone(),
-            },
-            None,
-        );
-    }
-    match route {
-        RunLaunchRoute::ManagedRuntime => execute_runtime_launch(strategy),
-        RunLaunchRoute::CodexCommandServerManagedStdio => {
-            execute_codex_command_server_managed_runtime(strategy)
-        }
-    }
-}
 pub(crate) fn resolved_super_runtime_tool_args(
     args: SuperArgs,
     presidio: bool,

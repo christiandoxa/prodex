@@ -197,7 +197,7 @@ fn merge_overlay_toml(target: &mut toml::Value, patch: toml::Value) {
     }
 }
 
-pub(super) fn runtime_overlay_transport_flags(
+pub(crate) fn runtime_overlay_transport_flags(
     args: &[std::ffi::OsString],
 ) -> prodex_mojo_core::runtime_overlay_policy::OverlayTransportFlags {
     let lossy = args

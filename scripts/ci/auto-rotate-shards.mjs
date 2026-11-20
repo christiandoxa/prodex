@@ -67,6 +67,7 @@ const AUTO_ROTATE_SHARDS = Object.freeze([
     label: "run fast passthrough cases",
     filters: [
       "run::run_exec_preserves_prompt_and_piped_stdin",
+      "run::run_exec_remote_keeps_the_server_in_control",
       "run::explicit_profile_can_disable_auto_rotate",
       "run::run_preflight_checks_fallback_profiles_in_parallel",
     ],

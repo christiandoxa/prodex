@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.170.0 release",
+      "baseline_source": "openai/codex rust-v0.171.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -98,9 +98,9 @@
             "remaining = 0",
             "CodexErrorDetails::ResponseIncomplete(incomplete)",
             "CompactionRequestKind::Background(_)",
-            "record_rollout_budget_usage(&turn_context.sub_id, usage)",
+            "record_rollout_budget_usage(&turn_context.sub_id, &usage)",
             "sess.record_incomplete_response_usage(",
-            "match event?"
+            "let Some(SamplingEvent { event, hook_output }) = event else"
           ]
         },
         {
@@ -700,8 +700,10 @@
         },
         {
           "path": "codex-rs/exec/src/cli.rs",
-          "reason": "Owns the global codex exec --thread-source SOURCE option that Prodex must preserve as an opaque option/value pair. Prodex must preserve the global per-turn program option and its single opaque value during managed launch, resume inspection, proxy configuration, and recovery retargeting. Codex owns value and provider eligibility validation.",
+          "reason": "Owns global exec options for thread source, per-turn program, and remote app-server connection. Prodex preserves the options and their values during launch. Codex validates remote authentication and provider eligibility.",
           "required_contains": [
+            "id = \"exec_remote\"",
+            "pub remote_auth_token_env: Option<String>",
             "ThreadSource",
             "long = \"thread-source\"",
             "value_name = \"SOURCE\"",
@@ -720,6 +722,7 @@
           "path": "codex-rs/exec/src/lib.rs",
           "reason": "Owns default-user thread classification plus propagation to newly started and forked threads without changing resumed thread metadata. Automatic Daybreak selection is gated, while an explicit per-turn program remains independent of that feature gate and saved preferences. Prodex forwards user choices without synthesizing opt-in or duplicating upstream routing.",
           "required_contains": [
+            "return remote::run(cli, endpoint).await;",
             "ThreadSource::User",
             "ThreadForkParams",
             "thread_start_params_from_config",
@@ -1493,7 +1496,7 @@
           "reason": "Native opt-in cancellation sends an interrupt to the active Responses Lite stream with a bounded deadline.",
           "required_contains": [
             ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
-            "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
+            "if tool_cancellation.is_cancelled() && !response_completed && can_interrupt",
             "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
             "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })",
             "pub(crate) fn build_prompt(",
@@ -1639,7 +1642,7 @@
             "fn update_mcp_startup_status",
             "self.mcp_startup_status.is_none() && !matches!(status, McpStartupStatus::Starting)",
             "let current = self.mcp_startup_status.as_ref()?",
-            "let first = starting.first()?",
+            "let first = to_show.first()?",
             "self.finish_mcp_startup();"
           ]
         },
@@ -3150,13 +3153,13 @@
           "id": "compact.v2-incomplete-usage-retained",
           "kind": "retry_lifecycle",
           "file": "codex-rs/core/src/compact_remote_v2.rs",
-          "reason": "Foreground and background v2 compaction preserve incomplete-response accounting without replacing the native terminal error.",
+          "reason": "Native sampling settlement preserves incomplete compaction usage and hook charges, with background and foreground accounting handled separately.",
           "file_contains_all": [
             "CodexErrorDetails::ResponseIncomplete(incomplete)",
             "CompactionRequestKind::Background(_)",
-            "record_rollout_budget_usage(&turn_context.sub_id, usage)",
+            "record_rollout_budget_usage(&turn_context.sub_id, &usage)",
             "sess.record_incomplete_response_usage(",
-            "match event?"
+            "let Some(SamplingEvent { event, hook_output }) = event else"
           ]
         },
         {
@@ -3585,10 +3588,10 @@
           "id": "responses.lite-cancel-interrupt",
           "kind": "retry_lifecycle",
           "file": "codex-rs/core/src/session/turn.rs",
-          "reason": "Native opt-in cancellation sends an interrupt to the active Responses Lite stream with a bounded deadline.",
+          "reason": "Native Responses Lite handles cancellation with a bounded protocol interrupt when the response has not already completed.",
           "file_contains_all": [
             ".enabled(Feature::InterruptOnCancel)\n        && step_context.settings.model_info.use_responses_lite\n        && stream.interrupt.is_some()",
-            "if cancellation_token.is_cancelled() && !response_completed && can_interrupt",
+            "if tool_cancellation.is_cancelled() && !response_completed && can_interrupt",
             "let deadline = tokio::time::Instant::now() + Duration::from_secs(1);",
             "interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline })"
           ]
@@ -3837,12 +3840,12 @@
           "id": "mcp.authoritative-startup-rounds",
           "kind": "session_lifecycle",
           "file": "codex-rs/tui/src/chatwidget/mcp_startup.rs",
-          "reason": "The TUI tracks only announced MCP startup events and settles a round when no observed server remains starting.",
+          "reason": "Native progress tracks server registrations by name and environment and handles outcomes received without a corresponding start.",
           "file_contains_all": [
             "fn update_mcp_startup_status",
             "self.mcp_startup_status.is_none() && !matches!(status, McpStartupStatus::Starting)",
             "let current = self.mcp_startup_status.as_ref()?",
-            "let first = starting.first()?",
+            "let first = to_show.first()?",
             "self.finish_mcp_startup();"
           ]
         },
@@ -4102,7 +4105,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.170.0",
+      "tested_codex_release": "rust-v0.171.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -4609,12 +4612,31 @@
             "codex": "880819aab735adcf16f36cd628940b9f1e652a36c01d10a5d32f83cc84902971"
           },
           "summary": "Qualifies immediate oversized-WebSocket HTTP fallback, advertised message limits, saved allocation/revision metadata, active recovery turns, permission-profile resume matching, environment-scoped MCP identities, cancellation-safe OAuth persistence, shared realtime thread headers and versioned answer display. GPT-6.2 catalog and Mantle normalization contracts remain present. Native feature defaults and session ownership remain authoritative."
+        },
+        {
+          "from": "rust-v0.170.0",
+          "to": "rust-v0.171.0",
+          "source_commit": "ccf9be8cc458bd6b8336fe84d68d8893f2691a5e",
+          "tag_object": "295eca93394bb83a6ec8e0841033f3997f97fcbd",
+          "upstream_release_date": "2026-11-20T00:44:47Z",
+          "source_archive_sha256": "fcd9a05d4e96ba533e81f405333cfab7a845669ed24a709544351ed176f40a2e",
+          "tree_comparison": {
+            "added": 226,
+            "removed": 33,
+            "modified": 1819
+          },
+          "native_linux_asset": "codex-x86_64-unknown-linux-musl.zst",
+          "native_linux_package_sha256": "0fd9ae1125788932131a29e296c4fef9995fc4f0c2a2ef6161221786e45ffa8c",
+          "native_linux_asset_sha256": {
+            "codex": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0"
+          },
+          "summary": "Qualifies remote noninteractive app-server connections, provider defaults, compaction sampling and cancellation, environment-scoped MCP startup, and refreshed app-server error and item schemas. Native Codex owns workspace UI, model defaults, remote connection behavior, and permissions."
         }
       ],
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
-        "schema_hash_note": "The 13 selected stable v2 lifecycle hashes were revalidated against the official Codex 0.170.0 binary. Seven response/notification schemas adopt the version-one show/hide/block AgentMessageDisplay contract; request and interrupt schemas remain unchanged. Required lifecycle methods are validated with --experimental.",
+        "schema_hash_note": "All 13 selected stable lifecycle hashes were checked against the official Codex 0.171.0 binary. Seven response and notification schemas add a policy error and optional MCP registration environment. Required RPC methods are verified with --experimental.",
         "required_methods": [
           "initialize",
           "initialized",
@@ -4625,40 +4647,40 @@
           "thread/queue/changed",
           "turn/start",
           "turn/interrupt",
+          "modelProvider/default/set",
           "mcpServer/event/stream/start",
           "mcpServer/event/stream/stop"
         ],
         "stable_v2_sha256": {
           "ThreadForkParams.json": "60540b97d453ddbc5e12bfaa007a3718f31847d18dec0da59a5e4b89be4717ad",
-          "ThreadForkResponse.json": "8214b312a37ab2fbaa1ef66f887b4e71c5b8c865e1aba82552fecb4698338028",
+          "ThreadForkResponse.json": "b36e2e1aedc6ddb70c6dcdf4414c7a1064b3ebc39c615f6e9c655f6570708803",
           "ThreadResumeParams.json": "cb2daef3e452f9dcb6cdd7a7a389b866ac486614558a46f3ec5538f3fe3b3ea1",
-          "ThreadResumeResponse.json": "0f174f94ba857ab81efb3f02f5e81a9719fd19e12b55a015f5d7c2c3d225d35d",
+          "ThreadResumeResponse.json": "ddcaa674e46e2ad795e6d41a616a79149f23ece3c290e48fa84b9399fe25f71b",
           "ThreadStartParams.json": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428",
-          "ThreadStartResponse.json": "efe4f9f8f4c017144fbacaa72e37c27389bc9e37d2d4875cba39b76dc8d532be",
-          "ThreadStartedNotification.json": "ba106c0f2391a73be06fd12fcc1d71fc26a791e2ca98de7bdab667d7bab8807d",
-          "TurnCompletedNotification.json": "1b7424e28723a1324f325c99dbfdf949a50e005cc5f90b813a21f5bbdaadae5b",
+          "ThreadStartResponse.json": "adafd968fc204c6a25395cba283b4acccb4f506c2ccf5c094864fbc0c38a63c7",
+          "ThreadStartedNotification.json": "b2a74ca74f5e19eea944009df542f81749360d2fd13351ee155bce70269eb845",
+          "TurnCompletedNotification.json": "f454bca363503aa6b56ca6ad673737dd8d86bee49d0c536b14d93c7df9f88005",
           "TurnInterruptParams.json": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b",
           "TurnInterruptResponse.json": "531de6be06fe979b5963f249bab82498a175e614bf65ac12fb2e849dfe60bcf1",
           "TurnStartParams.json": "7306e8a95152f1071b0fb8bcc22da20a798ae34c1c57b6d26dfafc2c2b47ee9e",
-          "TurnStartResponse.json": "a72be8b386a4f5738907df4177194deb0be6e4db42b852cce6bd9b9d54ab3e19",
-          "TurnStartedNotification.json": "80f2997d4589440a047e9f7d056c9ed857ce41741c5fbf4083747877b7f74a60"
+          "TurnStartResponse.json": "9604458949acd680b5c7c768d0e0f70eb3e026bff5496f5ad7afa02021ef305f",
+          "TurnStartedNotification.json": "9f3fe27abe1068ceafaeee017c565ae2943be36e57ab638a572a303495616f6b"
         }
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.170.0",
-      "name": "0.170.0",
-      "published_at": "2026-11-18T03:40:48Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.170.0",
+      "tag_name": "rust-v0.171.0",
+      "name": "0.171.0",
+      "published_at": "2026-11-20T00:44:47Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.171.0",
       "body_head": [
         "## New Features",
-        "- Added WebRTC negotiation for realtime voice calls in the TUI. (#61172)",
-        "- Added automatically refreshed authentication headers for OpenTelemetry HTTP exporters. (#61028)",
-        "- Added experimental support for using identically named MCP servers across environments. (#60905)",
+        "- Make GPT-6.2 Sol the default catalog selection and add GPT-6.2 Astra. (#62106)",
+        "- Enable the TUI workspace by default. (#61352)",
+        "- Support existing app servers in noninteractive exec. (#61707)",
+        "- Add MCP-backed status lines and local remote-control commands. (#61979, #61988, #62121)",
         "## Bug Fixes",
-        "- Oversized WebSocket requests now fall back to HTTP without unnecessary retries. (#60840, #60841)",
-        "- Fixed MCP OAuth credential races during cancellation, login, and logout. (#60849, #60981)",
-        "- Improved automatic reconnection for Cloud conversations and preserved active recovery turns when clients reconnect. (#60969, #61014)"
+        "- Preserve thread input across resumes and permission profiles across working directory updates. (#61216, #61195)"
       ]
     }
   },

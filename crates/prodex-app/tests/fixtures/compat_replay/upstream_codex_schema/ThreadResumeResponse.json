@@ -347,6 +347,7 @@
             "modelNotFound",
             "policyCapacityUnavailable",
             "cyberPolicy",
+            "bioPolicy",
             "misalignmentPolicyViolation",
             "tooManyDenials",
             "internalServerError",
@@ -2289,6 +2290,13 @@
               "format": "int64",
               "type": [
                 "integer",
+                "null"
+              ]
+            },
+            "environmentId": {
+              "description": "Registration scope, not necessarily the server's execution environment.",
+              "type": [
+                "string",
                 "null"
               ]
             },
