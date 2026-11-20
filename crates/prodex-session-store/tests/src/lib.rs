@@ -2,6 +2,7 @@ use super::*;
 use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod large_files;
@@ -513,18 +514,17 @@ fn session_resolve_error_response_is_stable_and_redacted() {
 }
 
 fn test_temp_dir(name: &str) -> PathBuf {
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
-        "prodex-session-store-{name}-{}-{}",
+        "prodex-session-store-{name}-{}-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos()
+            .as_nanos(),
+        NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
     ));
-    if root.exists() {
-        fs::remove_dir_all(&root).expect("old temp dir should be removed");
-    }
-    fs::create_dir_all(&root).expect("temp dir should be created");
+    fs::create_dir(&root).expect("temp dir should be created");
     root
 }
 
