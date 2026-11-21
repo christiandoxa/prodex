@@ -5,6 +5,7 @@ import { validateReleaseContainerPublication, validateReleaseMalwareGate } from 
 
 const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
 const targetWorkflow = readFileSync(".github/workflows/release-target.yml", "utf8");
+const scanner = readFileSync("scripts/ci/scan-release-assets.sh", "utf8");
 const jobs = new Map([...workflow.matchAll(/^  ([a-z][a-z0-9-]*):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:|$(?![\s\S]))/gm)]
   .filter(([, name, body]) => (body.includes("    runs-on:") || body.includes("    uses:")))
   .map(([, name, body]) => [name, body]));
@@ -112,17 +113,19 @@ test("the same pinned antivirus engine is proven during compilation, before fina
   assert.ok(!ancestors("antivirus-health").has("build"));
   assert.ok(ancestors("validate-release-assets").has("antivirus-health"));
   assert.ok(needs("verify-ci").includes("antivirus-health"));
+  assert.match(jobs.get("antivirus-health"), /bash scripts\/ci\/scan-release-assets\.sh scan-health/);
+  assert.match(jobs.get("validate-release-assets"), /bash scripts\/ci\/scan-release-assets\.sh release-assets/);
   for (const name of ["antivirus-health", "validate-release-assets"]) {
-    const body=jobs.get(name);
-    assert.match(body, /Verify pinned antivirus image/);
-    assert.match(body, /RepoDigests/);
-    assert.match(body, /clamav_update: "True"/);
-    assert.doesNotMatch(body, /contents: write|id-token: write/);
+    assert.doesNotMatch(jobs.get(name), /contents: write|id-token: write/);
   }
   assert.match(jobs.get("antivirus-health"), /EICAR/);
   assert.doesNotMatch(jobs.get("validate-release-assets"), /Prepare antivirus engine health check/);
   const noHealth=workflow.replace(jobs.get("validate-release-assets"),jobs.get("validate-release-assets").replace("      - antivirus-health\n", ""));
   assert.ok(validateReleaseMalwareGate(noHealth).length>0, "engine proof must gate clean assets");
+  for (const marker of ["--entrypoint freshclam", "--fail-if-cvd-older-than=7", "--allmatch=yes", "--network none", "target=/scan,readonly"]) {
+    assert.ok(validateReleaseMalwareGate(workflow, scanner.replace(marker, "")).length > 0,
+      `guard accepted weakened scan: ${marker}`);
+  }
 });
 
 test("one read-only artifact consumer generates mandatory SBOM before validating scanned assets", () => {

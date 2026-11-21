@@ -70,7 +70,7 @@ jobs:
           test "${actual_version}" = "${RELEASE_VERSION}"
 
       - name: Restore exact-input archive shared with main CI
-        if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
         id: release-archive-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -89,7 +89,7 @@ jobs:
           cp "target/mojo-runtime/${{ matrix.target }}/${archive_name}" "target/mojo-release/${{ matrix.target }}/${archive_name}"
 
       - name: Reuse exact-source strict CI Mojo archive when available
-        if: ${{ steps.release-archive-cache.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' && steps.release-archive-cache.outputs.cache-hit != 'true' }}
         id: reuse-ci-archive
         env:
           GH_TOKEN: ${{ github.token }}
@@ -277,6 +277,7 @@ jobs:
           fi
 
       - name: Cache Rust dependencies
+        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' }}
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           # Cargo fingerprints still recompile anything stale after restore.
@@ -363,6 +364,8 @@ jobs:
           qemu-aarch64 --version
 
       - name: Build prodex
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C link-arg=/Brepro"
         shell: bash
         run: |
           set -euo pipefail
@@ -421,6 +424,9 @@ jobs:
           if ($machine -ne 0x8664) {
             throw "Expected Windows x64 PE (0x8664), got $machine"
           }
+          $sha = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant()
+          "PRODEX_WINDOWS_X64_BUILD_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Windows x64 executable SHA256 $sha"
           # Fail closed if Windows ARM emulation cannot execute the x64 binary.
           & $binary --version
           if ($LASTEXITCODE -ne 0) {
@@ -586,8 +592,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
+          if [ "${{ matrix.target }}" = x86_64-pc-windows-msvc ]; then
+            printf '%s  %s\n' "${PRODEX_WINDOWS_X64_BUILD_SHA256:?missing pre-smoke hash}" "$binary" | sha256sum --check -
+          fi
           mkdir -p "dist/${{ matrix.artifact-name }}"
-          cp "target/${{ matrix.target }}/release/${{ matrix.binary-name }}" "dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}"
+          cp "$binary" "dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}"
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

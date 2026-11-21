@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -343,72 +344,59 @@ export function validateKicsConfiguration(workflowContents) {
   return violations;
 }
 
-export function validateReleaseMalwareGate(contents) {
+export function validateReleaseMalwareGate(
+  contents,
+  scanner = readFileSync(new URL("./scan-release-assets.sh", import.meta.url), "utf8"),
+) {
   const job = workflowJob(contents, "validate-release-assets");
   const publisher = workflowJob(contents, "publish-github-release");
   const health = workflowJob(contents, "antivirus-health");
   if (!job || !publisher || !health) return [".github/workflows/standalone-release.yml: missing release validation or publication job"];
+
   const violations = [];
-  const action =
-    "hugoalh/scan-virus-ghaction/clamav@99c81e8991ad1074a14e5f22a21bce9be035e14e";
   const prepare = job.indexOf("- name: Prepare release assets");
   const scan = job.indexOf("- name: Scan release assets for malware");
-  const requireClean = job.indexOf("- name: Require clean release assets");
   const publish = job.indexOf("- name: Upload validated release assets for the gated publisher");
-  if (!(prepare >= 0 && prepare < scan && scan < requireClean && requireClean < publish)) {
-    violations.push(
-      ".github/workflows/standalone-release.yml: malware scan must gate prepared assets before publication",
-    );
+  if (!(prepare >= 0 && prepare < scan && scan < publish)) {
+    violations.push(".github/workflows/standalone-release.yml: malware scan must gate prepared assets before publication");
   }
-  for (const marker of [
-    `uses: ${action} # v0.20.1`,
-    "Return ($ElementPreMeta.Path -notmatch '^release-assets[\\\\/]')",
-    "SCAN_OUTCOME: ${{ steps.release_malware_scan.outcome }}",
-    "SCAN_FINISH: ${{ steps.release_malware_scan.outputs.finish }}",
-    "SCAN_FOUND: ${{ steps.release_malware_scan.outputs.found }}",
-    "release asset malware scan scope is empty",
-  ]) {
-    if (!job.includes(marker)) {
-      violations.push(`.github/workflows/standalone-release.yml: malware gate missing ${marker}`);
-    }
+  if (!job.includes(
+    "- name: Scan release assets for malware\n        shell: bash\n        run: bash scripts/ci/scan-release-assets.sh release-assets\n",
+  )) {
+    violations.push(".github/workflows/standalone-release.yml: release asset scan must fail closed");
   }
   for (const marker of [
     "needs: release-preflight", "- name: Verify antivirus engine detects EICAR",
-    "- name: Require a working antivirus engine", `uses: ${action} # v0.20.1`,
-    "SCAN_OUTCOME: ${{ steps.antivirus_health.outcome }}",
-    "SCAN_FINISH: ${{ steps.antivirus_health.outputs.finish }}",
-    "SCAN_FOUND: ${{ steps.antivirus_health.outputs.found }}",
-    '"${SCAN_OUTCOME}" != "failure"', '"${SCAN_FINISH}" != "true"', '"${SCAN_FOUND}" != "true"',
+    "bash scripts/ci/scan-release-assets.sh scan-health",
+    'test "$status" -eq 1', "^/scan/eicar\\.com: .*EICAR.* FOUND$",
   ]) {
-    if (!health.includes(marker)) violations.push(`.github/workflows/standalone-release.yml: engine proof missing ${marker}`);
+    if (!health.includes(marker)) violations.push(".github/workflows/standalone-release.yml: engine proof missing " + marker);
   }
   if (!job.includes("      - antivirus-health")) violations.push(".github/workflows/standalone-release.yml: asset scan must wait for engine proof");
-  const digest = "806278ed1a2829743c4b9d92f29bdd49e384ab3cdc6bf19caea19b1390d4c085";
-  if (!contents.includes(`CLAMAV_IMAGE: ghcr.io/hugoalh/scan-virus-ghaction:0.20.1-clamav@sha256:${digest}`)) {
-    violations.push(".github/workflows/standalone-release.yml: antivirus image digest must stay pinned");
+  if (!contents.includes("CLAMAV_IMAGE: docker.io/clamav/clamav:1.5.5@sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8")) {
+    violations.push(".github/workflows/standalone-release.yml: official antivirus image digest must stay pinned");
   }
   for (const body of [health, job]) {
-    for (const marker of ["Verify pinned antivirus image", "RepoDigests", "clamav_update: \"True\"", "${CLAMAV_IMAGE##*@}"]) {
-      if (!body.includes(marker)) violations.push(`.github/workflows/standalone-release.yml: scanner identity/freshness missing ${marker}`);
-    }
     if (/contents: write|attestations: write|id-token: write/.test(body)) {
       violations.push(".github/workflows/standalone-release.yml: antivirus checks must be read-only");
     }
   }
   for (const marker of ["- validate-release-assets", "name: validated-release-assets", "sha256sum --check SHA256SUMS"]) {
     if (!publisher.includes(marker)) {
-      violations.push(`.github/workflows/standalone-release.yml: publisher must consume immutable scanned assets: ${marker}`);
+      violations.push(".github/workflows/standalone-release.yml: publisher must consume immutable scanned assets: " + marker);
     }
   }
-  const scanStep = scan >= 0 && requireClean > scan ? job.slice(scan, requireClean) : "";
-  if (scanStep.includes("continue-on-error: true")) {
-    violations.push(".github/workflows/standalone-release.yml: release asset scan must fail closed");
-  }
-  const requireCleanStep = requireClean >= 0 && publish > requireClean ? job.slice(requireClean, publish) : "";
-  if (requireCleanStep.includes("GITHUB_STEP_SUMMARY")) {
-    violations.push(
-      ".github/workflows/standalone-release.yml: malware gate must use action outputs, not another step's summary file",
-    );
+  for (const marker of [
+    "set -euo pipefail", "release asset malware scan scope is empty",
+    'docker pull "$CLAMAV_IMAGE"', "RepoDigests", "${CLAMAV_IMAGE##*@}",
+    "--entrypoint freshclam", "--network none", "--read-only",
+    "target=/var/lib/clamav,readonly", "target=/scan,readonly",
+    "--entrypoint clamscan", "--recursive", "--official-db-only=yes",
+    "--fail-if-cvd-older-than=7", "--allmatch=yes", "--alert-exceeds-max=yes",
+  ]) {
+    if (!scanner.includes(marker)) {
+      violations.push("scripts/ci/scan-release-assets.sh: malware gate missing " + marker);
+    }
   }
   return violations;
 }

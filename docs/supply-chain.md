@@ -54,7 +54,6 @@ refs:
 | `Swatinem/rust-cache` | `v2` | `6323deb102c322ba6fcbdcafc7e3dddab59af2b6` |
 | `mozilla-actions/sccache-action` | `v0.0.11` | `fc920bf0ec8de6ee65d409111f7ec508035751ba` |
 | `SonarSource/sonarqube-scan-action` | `v8.2.2` | `ba9859eae8dd6bd29e412f25ddbbef3d032000f4` |
-| `hugoalh/scan-virus-ghaction/clamav` | `v0.20.1` | `99c81e8991ad1074a14e5f22a21bce9be035e14e` |
 
 Docker Official Image manifest-list digests were resolved from the registry
 with `docker buildx imagetools inspect`. The pinned Rust, Debian, PostgreSQL,
@@ -64,6 +63,8 @@ SonarQube Community Build `26.7.0.124771-community` at manifest digest
 `sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3`.
 The KICS gate uses `v2.1.20` at manifest digest
 `sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602`.
+The release scan uses the official ClamAV image
+`docker.io/clamav/clamav:1.5.5@sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8`.
 Dependabot owns Dockerfile and Compose refreshes. The supply-chain guard keeps
 container inputs pinned, while standalone releases publish binaries,
 installers, the SBOM, and checksums only; they do not build or publish a
@@ -79,7 +80,7 @@ Primary pin sources:
 - [astral-sh/setup-uv](https://github.com/astral-sh/setup-uv)
 - [Swatinem/rust-cache](https://github.com/Swatinem/rust-cache)
 - [mozilla-actions/sccache-action](https://github.com/mozilla-actions/sccache-action)
-- [hugoalh/scan-virus-ghaction](https://github.com/hugoalh/scan-virus-ghaction)
+- [Official ClamAV container images](https://docs.clamav.net/manual/Installing/Docker.html)
 - [SonarQube Docker Official Image](https://hub.docker.com/_/sonarqube)
 - [SonarQube for VS Code supported languages](https://docs.sonarsource.com/sonarqube-for-vs-code/using/rules/)
 - [Docker Official Images](https://github.com/docker-library/official-images)
@@ -141,8 +142,12 @@ The release workflow:
 3. attests every binary in checkout-free jobs and attests the SPDX JSON SBOM;
 4. downloads the staged assets and verifies their GitHub attestations;
 5. generates, verifies, and attests `SHA256SUMS`; and
-6. malware-scans the final release assets before the tag and public release
-   are created.
+6. fetches signed ClamAV definitions, proves the engine detects EICAR, and
+   scans the final assets before the tag and public release are created.
+
+The Windows x64 release compiles from locked inputs without restoring
+compiled Rust dependencies or the Mojo archive. Its linker uses reproducible
+PE metadata. The workflow verifies the executable's SHA-256 after smoke tests.
 
 Run the local policy checks with:
 
