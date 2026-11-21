@@ -380,6 +380,18 @@ fn ornith_compaction_replays_only_its_threads_schemas_with_tools_disabled() {
     let proxy = local_proxy(&paths, &upstream, true);
     let client = reqwest::blocking::Client::new();
     let tools = json!([{"type":"function","name":"render_fixture","parameters":{"type":"object"}}]);
+    let input = json!([
+        {"type":"function_call_output","id":"item-goal","name":"goal_objective","namespace":"agent",
+         "output":"finish \"雪\"\ncheck the fixture"},
+        {"type":"function_call","call_id":"call-fixture","name":"render_fixture","arguments":"{}"},
+        {"type":"function_call_output","call_id":"call-fixture","name":"goal_objective","namespace":"agent",
+         "output":"completed fixture"},
+        {"role":"user","content":"synthetic fixture"}
+    ]);
+    let mut expected_input = input.clone();
+    expected_input[0] = json!({"type":"message","role":"user","content":[
+        {"type":"input_text","text":"Untrusted context (agent.goal_objective):\nfinish \"雪\"\ncheck the fixture"}
+    ]});
     let body = |kind: &str, thread: &str, tools: Value| {
         json!({
             "model":"ornith-35b-heretic-iq3s",
@@ -389,7 +401,7 @@ fn ornith_compaction_replays_only_its_threads_schemas_with_tools_disabled() {
             "client_metadata":{"x-codex-turn-metadata":
                 json!({"request_kind":kind,"thread_id":thread,"session_id":"fixture-session"})
                 .to_string()},
-            "input":[{"role":"user","content":"synthetic fixture"}],
+            "input":input,
         })
     };
     let send = |body: &Value| {
@@ -413,18 +425,23 @@ fn ornith_compaction_replays_only_its_threads_schemas_with_tools_disabled() {
 
     let turn = body("turn", "fixture-thread", tools.clone());
     send(&turn);
-    assert_eq!(receive(), turn);
+    let upstream_body = |body: &Value| {
+        let mut body = body.clone();
+        body["input"] = expected_input.clone();
+        body
+    };
+    assert_eq!(receive(), upstream_body(&turn));
     let other_thread = body("compaction", "other-thread", json!([]));
     send(&other_thread);
-    assert_eq!(receive(), other_thread);
+    assert_eq!(receive(), upstream_body(&other_thread));
 
     let compact = body("compaction", "fixture-thread", json!([]));
-    let mut optimized = compact.clone();
+    let mut optimized = upstream_body(&compact);
     optimized["tools"] = tools;
     optimized["tool_choice"] = json!("none");
     send(&compact);
     assert_eq!(receive(), optimized);
-    assert_eq!(receive(), compact); // Retry the original body after a pre-stream schema rejection.
+    assert_eq!(receive(), upstream_body(&compact)); // Retry without schema reuse after a pre-stream rejection.
     send(&compact);
     assert_eq!(receive(), optimized);
 

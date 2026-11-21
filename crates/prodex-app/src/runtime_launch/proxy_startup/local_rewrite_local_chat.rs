@@ -19,6 +19,9 @@ use super::local_rewrite_transport::{
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use crate::RuntimeProxyRequest;
 use anyhow::{Context, Result};
+use serde_json::value::{RawValue, to_raw_value};
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 pub(super) fn send_local_chat_request(
     request_id: u64,
@@ -117,7 +120,7 @@ pub(super) fn send_openai_or_local_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
-    body: Vec<u8>,
+    mut body: Vec<u8>,
     endpoint: prodex_provider_core::ProviderEndpoint,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys, local } =
@@ -138,6 +141,9 @@ pub(super) fn send_openai_or_local_request(
             .map_err(|error| anyhow::anyhow!("local model protocol selection failed: {error:?}"))?
         {
             return send_local_chat_request(request_id, request, shared, &body, &model);
+        }
+        if model == ORNITH_RESPONSES_MODEL {
+            body = rewrite_ornith_agent_context(&body).unwrap_or(body);
         }
         if shared.allow_local_file_access
             && model == ORNITH_RESPONSES_MODEL
@@ -167,6 +173,50 @@ pub(super) fn send_openai_or_local_request(
         shared.compaction_prefix.remember(schemas);
     }
     result
+}
+
+fn rewrite_ornith_agent_context(body: &[u8]) -> Option<Vec<u8>> {
+    let mut fields: BTreeMap<&str, &RawValue> = serde_json::from_slice(body).ok()?;
+    let items: Vec<&RawValue> = serde_json::from_str(fields.get("input")?.get()).ok()?;
+    let mut changed = false;
+    let mut input = Vec::with_capacity(items.len());
+    for item in items {
+        let message = ornith_agent_context_message(item);
+        changed |= message.is_some();
+        input.push(message.map_or(Cow::Borrowed(item), Cow::Owned));
+    }
+    if !changed {
+        return None;
+    }
+    // Preserve the raw tool schemas and other input items for the engine's prefix cache.
+    let input = to_raw_value(&input).ok()?;
+    fields.insert("input", &input);
+    serde_json::to_vec(&fields).ok()
+}
+
+fn ornith_agent_context_message(item: &RawValue) -> Option<Box<RawValue>> {
+    let value: serde_json::Value = serde_json::from_str(item.get()).ok()?;
+    if value["namespace"].as_str() != Some("agent")
+        || !prodex_provider_core::deepseek_provider_core_is_standalone_context_output(&value)
+            .ok()?
+    {
+        return None;
+    }
+    // llama.cpp requires a call ID for tool outputs. Keep Codex's standalone
+    // agent context at user privilege using the shared context renderer.
+    let messages = prodex_provider_core::deepseek_provider_core_messages_from_responses_request(
+        &serde_json::json!({"input":[value]}),
+        &[],
+        false,
+        "Local",
+    )
+    .ok()??;
+    let text = messages.first()?.get("content")?.as_str()?;
+    to_raw_value(&serde_json::json!({
+        "type":"message", "role":"user",
+        "content":[{"type":"input_text", "text":text}]
+    }))
+    .ok()
 }
 
 /// A session ID identifies the persisted transcript, not a remote cache in Chat
