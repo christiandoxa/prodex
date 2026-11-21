@@ -2,31 +2,37 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.171.2 - 2026-11-21
+
+### Misc
+
+- Reuse Ornith compaction prefix (`77f207f`)
+# Prodex 0.171.2
+
+Reuse Ornith's warm llama.cpp KV cache during automatic compaction.
+
+## New Features
+
+- Local Responses requests using `ornith-35b-heretic-iq3s` can reuse the tool
+  schemas from the most recent accepted request on the same thread.
+
+## Bug Fixes
+
+- Preserve the serialized tool schema order so the rendered prefix can match
+  the previous request when llama.cpp generates a summary.
+
+## Changelog
+
+- Keep tool execution disabled during compaction.
+- Fall back to the original compaction request on a pre-stream schema rejection.
+
+Full Changelog: [0.171.1...0.171.2](https://github.com/christiandoxa/prodex/compare/0.171.1...0.171.2)
+
 ## 0.171.1 - 2026-11-20
 
 ### Misc
 
 - Tolerate long-context inference prefill (`fc559d5`)
-# Prodex 0.171.1
-
-Keep long local inference requests open while the model processes the prompt.
-
-## New Features
-
-- Local `prodex s --url` launches with at least 131,072 context tokens now allow
-  15 minutes of SSE idle time.
-
-## Bug Fixes
-
-- Prevent reconnects at the five-minute mark during long local prefills by
-  extending the idle timeout in both Codex and the Prodex runtime proxy.
-
-## Changelog
-
-- Preserve explicit provider timeouts and runtime proxy policy or environment
-  overrides.
-
-Full Changelog: [0.171.0...0.171.1](https://github.com/christiandoxa/prodex/compare/0.171.0...0.171.1)
 
 ## 0.171.0 - 2026-11-20
 
@@ -138,13 +144,3 @@ Full Changelog: [0.171.0...0.171.1](https://github.com/christiandoxa/prodex/comp
 - Support endpoint-scoped API keys for URL launches (`e6667cf`)
 - Avoid duplicate cached reasoning on complete tool replays (`7f6f586`)
 - Retain resume bindings and complete reasoning streams (`e1b1c89`)
-
-## 0.167.3 - 2026-11-08
-
-### Docs
-
-- Keep the release guide link valid in generated changelogs (`9e3bcc9`)
-
-### Misc
-
-- Preserve model selection and support Offrail coding tools (`cf22e35`)
