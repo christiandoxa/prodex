@@ -111,6 +111,15 @@ activation. Presidio still asks for consent. Missing/incompatible external tools
 retain their existing launch diagnostics. Other local model aliases and cloud
 providers keep their existing protocol behavior.
 
+## Ornith compaction
+
+For the `ornith-35b-heretic-iq3s` alias on a local llama.cpp Responses endpoint,
+Prodex reuses the latest accepted tool schemas from the same thread during
+automatic compaction. Tool execution stays disabled. Preserving the rendered
+prefix lets llama.cpp reuse the warm KV cache while generating the summary.
+The schemas are held only in the running proxy. A fresh proxy or a backend
+that rejects the replay uses the regular compaction request.
+
 ## Authenticated endpoints and Cloudflare Tunnel
 
 `--api-key` works with `--url` for fresh sessions and UUID/picker resumes.

@@ -1,4 +1,5 @@
 use super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
+use super::super::local_rewrite_compaction_status::LocalCompactionPrefixCache;
 use super::super::local_rewrite_copilot::RuntimeCopilotOAuthPool;
 use super::super::local_rewrite_gemini::RuntimeGeminiOAuthPool;
 use super::super::local_rewrite_options::RuntimeLocalRewriteProviderOptions;
@@ -15,6 +16,7 @@ pub(in super::super) struct RuntimeLocalRewriteProcessServices {
     pub(in super::super) gemini_oauth_pool: Option<RuntimeGeminiOAuthPool>,
     pub(in super::super) copilot_oauth_pool: Option<RuntimeCopilotOAuthPool>,
     pub(in super::super) model_memory: RuntimeLocalRewriteModelMemory,
+    pub(in super::super) compaction_prefix: LocalCompactionPrefixCache,
     pub(in super::super) api_key_cursor: Arc<std::sync::atomic::AtomicUsize>,
     pub(in super::super) provider_sse_prefetch_slots: Arc<tokio::sync::Semaphore>,
     pub(in super::super) allow_local_file_access: bool,

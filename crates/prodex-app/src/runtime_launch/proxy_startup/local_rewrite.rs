@@ -393,6 +393,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         gemini_oauth_pool,
         copilot_oauth_pool,
         model_memory: Arc::new(Mutex::new(RuntimeLocalRewriteModelMemoryState::default())),
+        compaction_prefix: Default::default(),
         api_key_cursor: Arc::new(AtomicUsize::new(0)),
         provider_sse_prefetch_slots: Arc::new(tokio::sync::Semaphore::new(
             active_request_limit.max(1),

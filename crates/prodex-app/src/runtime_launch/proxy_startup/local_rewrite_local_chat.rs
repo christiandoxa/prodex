@@ -10,6 +10,9 @@ use super::local_rewrite::{
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult,
 };
+use super::local_rewrite_compaction_status::{
+    LocalCompactionPrefixRequest, ORNITH_RESPONSES_MODEL,
+};
 use super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, send_runtime_local_rewrite_prepared_request,
 };
@@ -122,6 +125,12 @@ pub(super) fn send_openai_or_local_request(
     else {
         anyhow::bail!("application provider dispatch does not match configured adapter")
     };
+    let send = |body| {
+        super::local_rewrite_upstream::send_runtime_openai_upstream_request(
+            request_id, request, shared, body, api_keys, endpoint,
+        )
+    };
+    let mut schemas = None;
     if *local && endpoint == prodex_provider_core::ProviderEndpoint::Responses {
         let model =
             super::provider_bridge::runtime_provider_model_from_body(&body).unwrap_or_default();
@@ -130,10 +139,34 @@ pub(super) fn send_openai_or_local_request(
         {
             return send_local_chat_request(request_id, request, shared, &body, &model);
         }
+        if shared.allow_local_file_access
+            && model == ORNITH_RESPONSES_MODEL
+            && runtime_proxy_crate::runtime_request_turn_state(request).is_none()
+        {
+            match shared.compaction_prefix.prepare(&body) {
+                Some(LocalCompactionPrefixRequest::Remember(value)) => schemas = Some(value),
+                Some(LocalCompactionPrefixRequest::Reuse(rewritten)) => {
+                    let result = send(rewritten);
+                    if !result
+                        .as_ref()
+                        .is_ok_and(|response| matches!(response.status(), 400 | 422))
+                    {
+                        return result;
+                    }
+                }
+                None => {}
+            }
+        }
     }
-    super::local_rewrite_upstream::send_runtime_openai_upstream_request(
-        request_id, request, shared, body, api_keys, endpoint,
-    )
+    let result = send(body);
+    if let Some(schemas) = schemas
+        && result
+            .as_ref()
+            .is_ok_and(|response| (200..300).contains(&response.status()))
+    {
+        shared.compaction_prefix.remember(schemas);
+    }
+    result
 }
 
 /// A session ID identifies the persisted transcript, not a remote cache in Chat

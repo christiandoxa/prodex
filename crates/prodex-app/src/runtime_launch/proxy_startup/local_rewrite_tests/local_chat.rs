@@ -372,6 +372,66 @@ fn local_responses_compaction_preserves_completed_tool_history_and_logs_status()
     fs::remove_dir_all(paths.root).unwrap();
 }
 
+#[test]
+fn ornith_compaction_replays_only_its_threads_schemas_with_tools_disabled() {
+    let paths = app_paths_for_root(temp_root("ornith-compact-prefix"));
+    let upstream =
+        TestUpstream::start_with_responses(vec![200, 200, 400, 200, 200], "application/json", "{}");
+    let proxy = local_proxy(&paths, &upstream, true);
+    let client = reqwest::blocking::Client::new();
+    let tools = json!([{"type":"function","name":"render_fixture","parameters":{"type":"object"}}]);
+    let body = |kind: &str, thread: &str, tools: Value| {
+        json!({
+            "model":"ornith-35b-heretic-iq3s",
+            "stream":false,
+            "tools":tools,
+            "tool_choice":"auto",
+            "client_metadata":{"x-codex-turn-metadata":
+                json!({"request_kind":kind,"thread_id":thread,"session_id":"fixture-session"})
+                .to_string()},
+            "input":[{"role":"user","content":"synthetic fixture"}],
+        })
+    };
+    let send = |body: &Value| {
+        let response = client
+            .post(format!("http://{}/v1/responses", proxy.listen_addr))
+            .json(body)
+            .send()
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        response.text().unwrap();
+    };
+    let receive = || -> Value {
+        serde_json::from_slice(
+            &upstream
+                .body_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap(),
+        )
+        .unwrap()
+    };
+
+    let turn = body("turn", "fixture-thread", tools.clone());
+    send(&turn);
+    assert_eq!(receive(), turn);
+    let other_thread = body("compaction", "other-thread", json!([]));
+    send(&other_thread);
+    assert_eq!(receive(), other_thread);
+
+    let compact = body("compaction", "fixture-thread", json!([]));
+    let mut optimized = compact.clone();
+    optimized["tools"] = tools;
+    optimized["tool_choice"] = json!("none");
+    send(&compact);
+    assert_eq!(receive(), optimized);
+    assert_eq!(receive(), compact); // Retry the original body after a pre-stream schema rejection.
+    send(&compact);
+    assert_eq!(receive(), optimized);
+
+    drop(proxy);
+    fs::remove_dir_all(paths.root).unwrap();
+}
+
 #[path = "local_resume.rs"]
 mod local_resume;
 
