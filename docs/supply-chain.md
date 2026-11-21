@@ -167,6 +167,16 @@ rejected the resulting unreviewed hash.
 An additional finding, scanner error, or different executable hash fails the
 gate. [Verified source build and scan](https://github.com/christiandoxa/prodex/actions/runs/44885409369)
 
+For `0.171.3`, a new source build had the same sole false positive. The 156-byte
+match again spanned the same three functions. All 233 normalized instructions
+matched `0.171.2`, including their Windows heap imports and switch targets.
+The exact reviewed Windows x64 SHA-256 is
+`65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73`.
+The workflow verifies source inputs against the original build, then retrieves
+its immutable artifact by run and artifact ID. It checks the digest before
+runtime smoke tests and scans those bytes with the full release assets.
+[Original 0.171.3 build and scan](https://github.com/christiandoxa/prodex/actions/runs/44925191608)
+
 Run the local policy checks with:
 
 ```bash

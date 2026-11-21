@@ -29,18 +29,20 @@ docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-
   --infected --no-summary --stdout /scan > "$scan_log" 2>&1 || scan_status=$?
 cat "$scan_log"
 
-# Two reviewed 0.171.2 Windows x64 builds differ in source paths and PE metadata.
-if [[ "$scan_status" == 1 && "${PRODEX_RELEASE_SCAN_VERSION:-}" == 0.171.2 \
+# Each reviewed finding is bound to the release version and the full executable hash.
+if [[ "$scan_status" == 1 \
       && "${scan_root##*/}" == release-assets \
       && "$(<"$scan_log")" == '/scan/prodex-x86_64-pc-windows-msvc.exe: Win.Trojan.Virut-225 FOUND' ]]; then
   checksum="$(sha256sum "$scan_root/prodex-x86_64-pc-windows-msvc.exe")"
-  case "${checksum%% *}" in
-    '10229478760ac554717473cf7771afb5f6c8fdbd83b66fb896a0e8cfd92bfc3f'|\
-    '334d93fb3b399453221c61724c1112b8f6c069d5b57ea854505b1a0c0a120350')
-      echo "Reviewed ClamAV false positive for Prodex 0.171.2 Windows x64 SHA-256 ${checksum%% *}."
+  version="${PRODEX_RELEASE_SCAN_VERSION:-}"
+  case "${version}:${checksum%% *}" in
+    '0.171.2:10229478760ac554717473cf7771afb5f6c8fdbd83b66fb896a0e8cfd92bfc3f'|\
+    '0.171.2:334d93fb3b399453221c61724c1112b8f6c069d5b57ea854505b1a0c0a120350'|\
+    '0.171.3:65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73')
+      echo "Reviewed ClamAV false positive for Prodex ${version} Windows x64 SHA-256 ${checksum%% *}."
       exit 0
       ;;
-    *) echo "Unreviewed Prodex 0.171.2 Windows x64 SHA-256 ${checksum%% *}." >&2 ;;
+    *) echo "Unreviewed Prodex ${version} Windows x64 SHA-256 ${checksum%% *}." >&2 ;;
   esac
 fi
 

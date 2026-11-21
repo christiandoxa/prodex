@@ -394,13 +394,14 @@ export function validateReleaseMalwareGate(
     "--entrypoint clamscan", "--recursive", "--official-db-only=yes",
     "--fail-if-cvd-older-than=7", "--allmatch=yes", "--alert-exceeds-max=yes",
     '--infected --no-summary --stdout', 'exit "$scan_status"',
-    '[[ "$scan_status" == 1 && "${PRODEX_RELEASE_SCAN_VERSION:-}" == 0.171.2',
+    '[[ "$scan_status" == 1', 'version="${PRODEX_RELEASE_SCAN_VERSION:-}"',
     '"${scan_root##*/}" == release-assets',
     "'/scan/prodex-x86_64-pc-windows-msvc.exe: Win.Trojan.Virut-225 FOUND'",
-    "10229478760ac554717473cf7771afb5f6c8fdbd83b66fb896a0e8cfd92bfc3f",
-    "334d93fb3b399453221c61724c1112b8f6c069d5b57ea854505b1a0c0a120350",
+    "0.171.2:10229478760ac554717473cf7771afb5f6c8fdbd83b66fb896a0e8cfd92bfc3f",
+    "0.171.2:334d93fb3b399453221c61724c1112b8f6c069d5b57ea854505b1a0c0a120350",
+    "0.171.3:65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73",
     'checksum="$(sha256sum "$scan_root/prodex-x86_64-pc-windows-msvc.exe")"',
-    'case "${checksum%% *}" in',
+    'case "${version}:${checksum%% *}" in',
   ]) {
     if (!scanner.includes(marker)) {
       violations.push("scripts/ci/scan-release-assets.sh: malware gate missing " + marker);

@@ -124,8 +124,9 @@ test("the same pinned antivirus engine is proven during compilation, before fina
   assert.ok(validateReleaseMalwareGate(noHealth).length>0, "engine proof must gate clean assets");
   for (const marker of [
     "--entrypoint freshclam", "--fail-if-cvd-older-than=7", "--allmatch=yes",
-    "--network none", "target=/scan,readonly", '== 0.171.2', "Win.Trojan.Virut-225 FOUND",
-    'checksum="$(sha256sum', 'case "${checksum%% *}" in', 'exit "$scan_status"',
+    "--network none", "target=/scan,readonly", 'version="${PRODEX_RELEASE_SCAN_VERSION:-}"',
+    "Win.Trojan.Virut-225 FOUND", 'checksum="$(sha256sum',
+    'case "${version}:${checksum%% *}" in', 'exit "$scan_status"',
   ]) {
     assert.ok(validateReleaseMalwareGate(workflow, scanner.replace(marker, "")).length > 0,
       `guard accepted weakened scan: ${marker}`);
@@ -142,6 +143,29 @@ test("reviewed Windows archive reuse requires matching source and an immutable a
   ];
   let previous = targetWorkflow.indexOf("- name: Reuse exact-source strict CI Mojo archive");
   assert.ok(previous >= 0);
+  for (const marker of markers) {
+    const position = targetWorkflow.indexOf(marker, previous + 1);
+    assert.ok(position > previous, `missing or out of order: ${marker}`);
+    previous = position;
+  }
+});
+
+test("reviewed Windows x64 executable is pinned to its source and checked before smoke tests", () => {
+  const markers = [
+    "- name: Verify source for reviewed Windows x64 executable",
+    "matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3'",
+    'git diff --exit-code "${reviewed_source}" HEAD',
+    "- name: Retrieve reviewed Windows x64 executable",
+    "matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3'",
+    "run-id: 44925191608",
+    "artifact-ids: '14715940083'",
+    "digest-mismatch: error",
+    "- name: Build prodex",
+    "matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.3'",
+    "$sha -cne '65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73'",
+    "- name: Verify compiled-in Mojo release",
+  ];
+  let previous = -1;
   for (const marker of markers) {
     const position = targetWorkflow.indexOf(marker, previous + 1);
     assert.ok(position > previous, `missing or out of order: ${marker}`);

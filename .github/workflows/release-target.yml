@@ -297,7 +297,7 @@ jobs:
           fi
 
       - name: Cache Rust dependencies
-        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.2' }}
+        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' || (inputs.version != '0.171.2' && inputs.version != '0.171.3') }}
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           # Cargo fingerprints still recompile anything stale after restore.
@@ -383,7 +383,36 @@ jobs:
           aarch64-linux-gnu-gcc --version
           qemu-aarch64 --version
 
+      - name: Verify source for reviewed Windows x64 executable
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          reviewed_source=49a10b1041dcae8891e2f41c3958daa86c868479
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/44925191608" --jq '.head_sha')" = "${reviewed_source}"
+          git fetch --no-tags --depth=1 origin "${reviewed_source}"
+          git diff --exit-code "${reviewed_source}" HEAD -- . \
+            ':(exclude).github/workflows/release-target.yml' \
+            ':(exclude)docs/supply-chain.md' \
+            ':(exclude)scripts/ci/release-parallelism.test.mjs' \
+            ':(exclude)scripts/ci/scan-release-assets.sh' \
+            ':(exclude)scripts/ci/supply-chain-guard.mjs'
+
+      - name: Retrieve reviewed Windows x64 executable
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44925191608
+          artifact-ids: '14715940083'
+          path: target/x86_64-pc-windows-msvc/release
+          merge-multiple: true
+          digest-mismatch: error
+
       - name: Build prodex
+        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.3' }}
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C link-arg=/Brepro"
         shell: bash
@@ -426,6 +455,8 @@ jobs:
       - name: Verify emulated Windows x64 artifact on native ARM64 host
         if: ${{ matrix.target == 'x86_64-pc-windows-msvc' }}
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:PROCESSOR_ARCHITECTURE -cne 'ARM64') {
@@ -445,6 +476,9 @@ jobs:
             throw "Expected Windows x64 PE (0x8664), got $machine"
           }
           $sha = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($env:RELEASE_VERSION -ceq '0.171.3' -and $sha -cne '65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73') {
+            throw "Reviewed Windows x64 executable hash does not match: $sha"
+          }
           "PRODEX_WINDOWS_X64_BUILD_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Windows x64 executable SHA256 $sha"
           # Fail closed if Windows ARM emulation cannot execute the x64 binary.
