@@ -122,7 +122,11 @@ test("the same pinned antivirus engine is proven during compilation, before fina
   assert.doesNotMatch(jobs.get("validate-release-assets"), /Prepare antivirus engine health check/);
   const noHealth=workflow.replace(jobs.get("validate-release-assets"),jobs.get("validate-release-assets").replace("      - antivirus-health\n", ""));
   assert.ok(validateReleaseMalwareGate(noHealth).length>0, "engine proof must gate clean assets");
-  for (const marker of ["--entrypoint freshclam", "--fail-if-cvd-older-than=7", "--allmatch=yes", "--network none", "target=/scan,readonly"]) {
+  for (const marker of [
+    "--entrypoint freshclam", "--fail-if-cvd-older-than=7", "--allmatch=yes",
+    "--network none", "target=/scan,readonly", '== 0.171.2', "Win.Trojan.Virut-225 FOUND",
+    'checksum="$(sha256sum', 'case "${checksum%% *}" in', 'exit "$scan_status"',
+  ]) {
     assert.ok(validateReleaseMalwareGate(workflow, scanner.replace(marker, "")).length > 0,
       `guard accepted weakened scan: ${marker}`);
   }

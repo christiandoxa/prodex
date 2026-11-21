@@ -539,6 +539,8 @@ jobs:
           node scripts/ci/macos-deployment-guard.mjs aarch64-apple-darwin release-assets/prodex-aarch64-apple-darwin
 
       - name: Scan release assets for malware
+        env:
+          PRODEX_RELEASE_SCAN_VERSION: ${{ steps.release.outputs.version }}
         shell: bash
         run: bash scripts/ci/scan-release-assets.sh release-assets
 

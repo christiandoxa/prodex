@@ -145,9 +145,23 @@ The release workflow:
 6. fetches signed ClamAV definitions, proves the engine detects EICAR, and
    scans the final assets before the tag and public release are created.
 
-The Windows x64 release compiles from locked inputs without restoring
-compiled Rust dependencies or the Mojo archive. Its linker uses reproducible
-PE metadata. The workflow verifies the executable's SHA-256 after smoke tests.
+Windows x64 uses reproducible PE metadata, and the workflow verifies the
+executable's SHA-256 after smoke tests. For `0.171.2`, it also compiles from
+locked inputs without restoring compiled Rust dependencies or the Mojo archive.
+
+The `0.171.2` Windows x64 executable has one reviewed ClamAV finding,
+`Win.Trojan.Virut-225`. Static comparison against `0.171.1` traced
+the match to relocated operands across the same three functions, with matching
+heap imports and jump table targets. The scan gate accepts this single result
+for either of these independently reviewed SHA-256 hashes:
+
+- `10229478760ac554717473cf7771afb5f6c8fdbd83b66fb896a0e8cfd92bfc3f`
+- `334d93fb3b399453221c61724c1112b8f6c069d5b57ea854505b1a0c0a120350`
+
+The two builds have identical executable code. Their 118 differing bytes are
+AWS-LC short source paths and the derived PE metadata.
+An additional finding, scanner error, or different executable hash fails the
+gate. [Verified source build and scan](https://github.com/christiandoxa/prodex/actions/runs/44885409369)
 
 Run the local policy checks with:
 

@@ -70,7 +70,7 @@ jobs:
           test "${actual_version}" = "${RELEASE_VERSION}"
 
       - name: Restore exact-input archive shared with main CI
-        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+        if: ${{ (matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.2') && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
         id: release-archive-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -89,7 +89,7 @@ jobs:
           cp "target/mojo-runtime/${{ matrix.target }}/${archive_name}" "target/mojo-release/${{ matrix.target }}/${archive_name}"
 
       - name: Reuse exact-source strict CI Mojo archive when available
-        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' && steps.release-archive-cache.outputs.cache-hit != 'true' }}
+        if: ${{ (matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.2') && steps.release-archive-cache.outputs.cache-hit != 'true' }}
         id: reuse-ci-archive
         env:
           GH_TOKEN: ${{ github.token }}
@@ -277,7 +277,7 @@ jobs:
           fi
 
       - name: Cache Rust dependencies
-        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' }}
+        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.2' }}
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           # Cargo fingerprints still recompile anything stale after restore.

@@ -361,7 +361,7 @@ export function validateReleaseMalwareGate(
     violations.push(".github/workflows/standalone-release.yml: malware scan must gate prepared assets before publication");
   }
   if (!job.includes(
-    "- name: Scan release assets for malware\n        shell: bash\n        run: bash scripts/ci/scan-release-assets.sh release-assets\n",
+    "- name: Scan release assets for malware\n        env:\n          PRODEX_RELEASE_SCAN_VERSION: ${{ steps.release.outputs.version }}\n        shell: bash\n        run: bash scripts/ci/scan-release-assets.sh release-assets\n",
   )) {
     violations.push(".github/workflows/standalone-release.yml: release asset scan must fail closed");
   }
@@ -393,6 +393,14 @@ export function validateReleaseMalwareGate(
     "target=/var/lib/clamav,readonly", "target=/scan,readonly",
     "--entrypoint clamscan", "--recursive", "--official-db-only=yes",
     "--fail-if-cvd-older-than=7", "--allmatch=yes", "--alert-exceeds-max=yes",
+    '--infected --no-summary --stdout', 'exit "$scan_status"',
+    '[[ "$scan_status" == 1 && "${PRODEX_RELEASE_SCAN_VERSION:-}" == 0.171.2',
+    '"${scan_root##*/}" == release-assets',
+    "'/scan/prodex-x86_64-pc-windows-msvc.exe: Win.Trojan.Virut-225 FOUND'",
+    "10229478760ac554717473cf7771afb5f6c8fdbd83b66fb896a0e8cfd92bfc3f",
+    "334d93fb3b399453221c61724c1112b8f6c069d5b57ea854505b1a0c0a120350",
+    'checksum="$(sha256sum "$scan_root/prodex-x86_64-pc-windows-msvc.exe")"',
+    'case "${checksum%% *}" in',
   ]) {
     if (!scanner.includes(marker)) {
       violations.push("scripts/ci/scan-release-assets.sh: malware gate missing " + marker);
