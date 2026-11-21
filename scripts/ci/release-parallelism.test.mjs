@@ -132,6 +132,23 @@ test("the same pinned antivirus engine is proven during compilation, before fina
   }
 });
 
+test("reviewed Windows archive reuse requires matching source and an immutable artifact", () => {
+  const markers = [
+    '"${RELEASE_VERSION}" == 0.171.2', "== x86_64-pc-windows-msvc",
+    'git diff --exit-code "${reviewed_source}" HEAD', "/actions/artifacts/14699399904/zip",
+    "0aaf9c29139a47ddeb0b4bdf594316d413ecbf9c5d49f9486b58709515fec9a1",
+    "| sha256sum -c -", 'unzip -p "${zip}" prodex_mojo_core.lib', "echo 'reused=true'",
+    "- name: Verify target archive",
+  ];
+  let previous = targetWorkflow.indexOf("- name: Reuse exact-source strict CI Mojo archive");
+  assert.ok(previous >= 0);
+  for (const marker of markers) {
+    const position = targetWorkflow.indexOf(marker, previous + 1);
+    assert.ok(position > previous, `missing or out of order: ${marker}`);
+    previous = position;
+  }
+});
+
 test("one read-only artifact consumer generates mandatory SBOM before validating scanned assets", () => {
   assert.ok(!jobs.has("prepare-release"));
   const validation = jobs.get("validate-release-assets");

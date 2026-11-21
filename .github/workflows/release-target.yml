@@ -89,14 +89,34 @@ jobs:
           cp "target/mojo-runtime/${{ matrix.target }}/${archive_name}" "target/mojo-release/${{ matrix.target }}/${archive_name}"
 
       - name: Reuse exact-source strict CI Mojo archive when available
-        if: ${{ (matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.2') && steps.release-archive-cache.outputs.cache-hit != 'true' }}
+        if: ${{ steps.release-archive-cache.outputs.cache-hit != 'true' }}
         id: reuse-ci-archive
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TARGET_SHA: ${{ inputs.target_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "${RELEASE_VERSION}" == 0.171.2 && '${{ matrix.target }}' == x86_64-pc-windows-msvc ]]; then
+            # Both reviewed binaries link this exact archive from the locked source.
+            reviewed_source=2d0d7f46e6167174686b553fdef6d4fbd43793aa
+            git fetch --no-tags --depth=1 origin "${reviewed_source}"
+            git diff --exit-code "${reviewed_source}" HEAD -- . \
+              ':(exclude).github/workflows/release-target.yml' \
+              ':(exclude).github/workflows/standalone-release.yml' \
+              ':(exclude)docs/supply-chain.md' \
+              ':(exclude)scripts/ci/release-parallelism.test.mjs' \
+              ':(exclude)scripts/ci/scan-release-assets.sh' \
+              ':(exclude)scripts/ci/supply-chain-guard.mjs'
+            zip="${RUNNER_TEMP}/reviewed-mojo-win-x64.zip"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/14699399904/zip" > "${zip}"
+            printf '%s  %s\n' '0aaf9c29139a47ddeb0b4bdf594316d413ecbf9c5d49f9486b58709515fec9a1' "${zip}" | sha256sum -c -
+            mkdir -p target/mojo-release/x86_64-pc-windows-msvc
+            unzip -p "${zip}" prodex_mojo_core.lib > target/mojo-release/x86_64-pc-windows-msvc/prodex_mojo_core.lib
+            echo 'reused=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
           python3 scripts/ci/reuse_mojo_ci_archive.py --release-history             --target '${{ matrix.target }}'             --sha "${RELEASE_TARGET_SHA}"             --output-dir 'target/mojo-release/${{ matrix.target }}'
 
       - name: Install Rust target

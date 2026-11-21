@@ -146,8 +146,10 @@ The release workflow:
    scans the final assets before the tag and public release are created.
 
 Windows x64 uses reproducible PE metadata, and the workflow verifies the
-executable's SHA-256 after smoke tests. For `0.171.2`, it also compiles from
-locked inputs without restoring compiled Rust dependencies or the Mojo archive.
+executable's SHA-256 after smoke tests. For `0.171.2`, it compiles from locked
+inputs without restoring compiled Rust dependencies. It links the immutable
+Mojo archive from the two reviewed builds after verifying the archive SHA-256
+and that the source tree differs only in release policy files.
 
 The `0.171.2` Windows x64 executable has one reviewed ClamAV finding,
 `Win.Trojan.Virut-225`. Static comparison against `0.171.1` traced
@@ -160,6 +162,8 @@ for either of these independently reviewed SHA-256 hashes:
 
 The two builds have identical executable code. Their 118 differing bytes are
 AWS-LC short source paths and the derived PE metadata.
+A fresh build of the Mojo archive varied the executable code and the gate
+rejected the resulting unreviewed hash.
 An additional finding, scanner error, or different executable hash fails the
 gate. [Verified source build and scan](https://github.com/christiandoxa/prodex/actions/runs/44885409369)
 
