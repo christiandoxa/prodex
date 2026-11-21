@@ -152,6 +152,8 @@ test("reviewed Windows archive reuse requires matching source and an immutable a
 
 test("reviewed Windows x64 executable is pinned to its source and checked before smoke tests", () => {
   const markers = [
+    "- name: Build prodex",
+    "matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.3'",
     "- name: Verify source for reviewed Windows x64 executable",
     "matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3'",
     'git diff --exit-code "${reviewed_source}" HEAD',
@@ -160,8 +162,6 @@ test("reviewed Windows x64 executable is pinned to its source and checked before
     "run-id: 44925191608",
     "artifact-ids: '14715940083'",
     "digest-mismatch: error",
-    "- name: Build prodex",
-    "matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.3'",
     "$sha -cne '65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73'",
     "- name: Verify compiled-in Mojo release",
   ];

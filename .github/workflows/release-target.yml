@@ -383,34 +383,6 @@ jobs:
           aarch64-linux-gnu-gcc --version
           qemu-aarch64 --version
 
-      - name: Verify source for reviewed Windows x64 executable
-        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3' }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          reviewed_source=49a10b1041dcae8891e2f41c3958daa86c868479
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/44925191608" --jq '.head_sha')" = "${reviewed_source}"
-          git fetch --no-tags --depth=1 origin "${reviewed_source}"
-          git diff --exit-code "${reviewed_source}" HEAD -- . \
-            ':(exclude).github/workflows/release-target.yml' \
-            ':(exclude)docs/supply-chain.md' \
-            ':(exclude)scripts/ci/release-parallelism.test.mjs' \
-            ':(exclude)scripts/ci/scan-release-assets.sh' \
-            ':(exclude)scripts/ci/supply-chain-guard.mjs'
-
-      - name: Retrieve reviewed Windows x64 executable
-        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3' }}
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          github-token: ${{ github.token }}
-          run-id: 44925191608
-          artifact-ids: '14715940083'
-          path: target/x86_64-pc-windows-msvc/release
-          merge-multiple: true
-          digest-mismatch: error
-
       - name: Build prodex
         if: ${{ matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.3' }}
         env:
@@ -451,6 +423,34 @@ jobs:
               RUSTC_WRAPPER=sccache cargo build --locked "${build_args[@]}"
             fi
           fi
+
+      - name: Verify source for reviewed Windows x64 executable
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          reviewed_source=49a10b1041dcae8891e2f41c3958daa86c868479
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/44925191608" --jq '.head_sha')" = "${reviewed_source}"
+          git fetch --no-tags --depth=1 origin "${reviewed_source}"
+          git diff --exit-code "${reviewed_source}" HEAD -- . \
+            ':(exclude).github/workflows/release-target.yml' \
+            ':(exclude)docs/supply-chain.md' \
+            ':(exclude)scripts/ci/release-parallelism.test.mjs' \
+            ':(exclude)scripts/ci/scan-release-assets.sh' \
+            ':(exclude)scripts/ci/supply-chain-guard.mjs'
+
+      - name: Retrieve reviewed Windows x64 executable
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: 44925191608
+          artifact-ids: '14715940083'
+          path: target/x86_64-pc-windows-msvc/release
+          merge-multiple: true
+          digest-mismatch: error
 
       - name: Verify emulated Windows x64 artifact on native ARM64 host
         if: ${{ matrix.target == 'x86_64-pc-windows-msvc' }}
