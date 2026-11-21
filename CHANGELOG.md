@@ -2,31 +2,36 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.171.3 - 2026-11-21
+
+### Misc
+
+- Support Codex goals on Ornith Responses (`fddb036`)
+# Prodex 0.171.3
+
+Run Codex goals through Ornith's local Responses endpoint.
+
+## New Features
+
+- Use `/goal <objective>` with `ornith-35b-heretic-iq3s` in `prodex s`.
+
+## Bug Fixes
+
+- Forward standalone Codex goal context as user input so llama.cpp can accept
+  the request and keep the original objective in the prompt.
+
+## Changelog
+
+- Preserve tool calls, tool results, and serialized tool schemas when adapting
+  goal context, including during automatic compaction.
+
+Full Changelog: [0.171.2...0.171.3](https://github.com/christiandoxa/prodex/compare/0.171.2...0.171.3)
+
 ## 0.171.2 - 2026-11-21
 
 ### Misc
 
 - Reuse Ornith compaction prefix (`77f207f`)
-# Prodex 0.171.2
-
-Reuse Ornith's warm llama.cpp KV cache during automatic compaction.
-
-## New Features
-
-- Local Responses requests using `ornith-35b-heretic-iq3s` can reuse the tool
-  schemas from the most recent accepted request on the same thread.
-
-## Bug Fixes
-
-- Preserve the serialized tool schema order so the rendered prefix can match
-  the previous request when llama.cpp generates a summary.
-
-## Changelog
-
-- Keep tool execution disabled during compaction.
-- Fall back to the original compaction request on a pre-stream schema rejection.
-
-Full Changelog: [0.171.1...0.171.2](https://github.com/christiandoxa/prodex/compare/0.171.1...0.171.2)
 
 ## 0.171.1 - 2026-11-20
 
@@ -136,11 +141,3 @@ Full Changelog: [0.171.1...0.171.2](https://github.com/christiandoxa/prodex/comp
 - Preserve unkeyed Responses session bindings (`e3a7a5d`)
 - Merge remote-tracking branch 'origin/pr-125' into task/strata-01675 (`c1839ef`)
 - Merge remote-tracking branch 'origin/pr-124' into task/strata-01675 (`9cf3bbe`)
-
-## 0.167.4 - 2026-11-09
-
-### Misc
-
-- Support endpoint-scoped API keys for URL launches (`e6667cf`)
-- Avoid duplicate cached reasoning on complete tool replays (`7f6f586`)
-- Retain resume bindings and complete reasoning streams (`e1b1c89`)
