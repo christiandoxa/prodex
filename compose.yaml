@@ -1,3 +1,8 @@
+# Legacy enterprise deployment template: unsupported by the current Prodex CLI.
+# The dedicated gateway/control-plane executables and storage adapters were removed.
+# Retained for historical reference and isolated database image validation only.
+# See docs/deployment.md for supported CLI container commands; do not start this
+# template as a current Prodex application deployment.
 services:
   prodex-gateway:
     build:

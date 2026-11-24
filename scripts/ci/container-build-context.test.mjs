@@ -87,3 +87,22 @@ test("Cargo rejects a builder context that omits the vendored patch", () => {
   assert.match(result.stderr, /tiny_http/u);
   assert.match(result.stderr, /failed to (?:load|read)|No such file|cannot find|does not contain packages/iu);
 });
+
+test("Docker runtime copies only executable targets built from the root Cargo package", () => {
+  const result = spawnSync("cargo", ["metadata", "--offline", "--locked", "--no-deps", "--format-version", "1"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 20000,
+  });
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+  const metadata = JSON.parse(result.stdout);
+  const root = metadata.packages.find((entry) => entry.manifest_path === path.join(repoRoot, "Cargo.toml"));
+  assert.ok(root, "Cargo metadata must contain the root package built by Docker");
+  const targets = new Set(root.targets.filter((entry) => entry.kind.includes("bin")).map((entry) => entry.name));
+  const dockerfile = readFileSync(path.join(repoRoot, "Dockerfile"), "utf8");
+  const copies = Array.from(dockerfile.matchAll(/^COPY\s+--from=builder\s+\/workspace\/target\/release\/([^\s/]+)\s+/gmu), (match) => match[1]);
+  assert.ok(copies.length > 0, "runtime image must copy a compiled executable");
+  for (const executable of copies) {
+    assert.ok(targets.has(executable), `Docker copies nonexistent Cargo executable: ${executable}`);
+  }
+});

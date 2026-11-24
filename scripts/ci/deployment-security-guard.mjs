@@ -891,35 +891,28 @@ export function validateDeploymentSecurity(inputs) {
     composePath,
     "public readiness healthcheck",
   );
+  // The current workspace builds only the CLI. Legacy template checks above
+  // remain separate from this executable image contract.
   requireIncludes(checks, dockerfile, "USER prodex", dockerfilePath, "non-root runtime user");
   requireIncludes(
     checks,
     dockerfile,
-    "/workspace/target/release/prodex-gateway",
+    "COPY --from=builder /workspace/target/release/prodex /usr/local/bin/prodex",
     dockerfilePath,
-    "prodex-gateway binary copy",
+    "current prodex CLI binary copy",
   );
   requireIncludes(
     checks,
     dockerfile,
-    "/workspace/target/release/prodex-control-plane",
+    'ENTRYPOINT ["/usr/local/bin/prodex"]',
     dockerfilePath,
-    "prodex-control-plane binary copy",
+    "current prodex CLI entrypoint",
   );
-  requireIncludes(
-    checks,
-    dockerfile,
-    'ENTRYPOINT ["/usr/local/bin/prodex-gateway"]',
-    dockerfilePath,
-    "dedicated gateway default entrypoint",
-  );
-  requireIncludes(
-    checks,
-    dockerfile,
-    'CMD ["serve", "--listen", "0.0.0.0:4000"]',
-    dockerfilePath,
-    "dedicated gateway default serve command",
-  );
+  requireIncludes(checks, dockerfile, 'CMD ["--help"]', dockerfilePath, "safe CLI default command");
+  requireIncludes(checks, dockerfile, "HEALTHCHECK NONE", dockerfilePath, "no server probe for the CLI image");
+  if (/^\s*EXPOSE\s/mu.test(dockerfile)) {
+    checks.push(`${dockerfilePath}: the default CLI image must not expose a server port`);
+  }
 
   if (/healthcheck:[\s\S]*Authorization:\s*Bearer/u.test(compose)) {
     checks.push(`${composePath}: healthcheck must not place bearer tokens in process arguments`);
@@ -1049,11 +1042,11 @@ redis_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_REDIS_URL" }
     ).join("\n"),
     deploymentGuide: REQUIRED_DEPLOYMENT_GUIDE_MARKERS.map(([needle]) => needle).join("\n"),
     dockerfile: `
-COPY --from=builder /workspace/target/release/prodex-gateway /usr/local/bin/prodex-gateway
-COPY --from=builder /workspace/target/release/prodex-control-plane /usr/local/bin/prodex-control-plane
+COPY --from=builder /workspace/target/release/prodex /usr/local/bin/prodex
 USER prodex
-ENTRYPOINT ["/usr/local/bin/prodex-gateway"]
-CMD ["serve", "--listen", "0.0.0.0:4000"]
+HEALTHCHECK NONE
+ENTRYPOINT ["/usr/local/bin/prodex"]
+CMD ["--help"]
 `,
     kubernetes: `
 kind: Namespace
@@ -1541,6 +1534,24 @@ function assertSelfTest(condition, message) {
 export function runSelfTest() {
   const valid = validFixture();
   assertSelfTest(validateDeploymentSecurity(valid).length === 0, "valid fixture rejected");
+  for (const [before, after, expected] of [
+    ["USER prodex", "USER root", "non-root runtime user"],
+    ["/workspace/target/release/prodex /usr/local/bin/prodex", "/workspace/target/release/prodex-gateway /usr/local/bin/prodex", "current prodex CLI binary copy"],
+    ['ENTRYPOINT ["/usr/local/bin/prodex"]', 'ENTRYPOINT ["/usr/local/bin/prodex-gateway"]', "current prodex CLI entrypoint"],
+    ['CMD ["--help"]', 'CMD ["gateway"]', "safe CLI default command"],
+    ["HEALTHCHECK NONE", "HEALTHCHECK CMD curl http://127.0.0.1:4000/readyz", "no server probe for the CLI image"],
+  ]) {
+    assertSelfTest(
+      validateDeploymentSecurity({ ...valid, dockerfile: valid.dockerfile.replace(before, after) })
+        .some((error) => error.includes(expected)),
+      `invalid CLI image accepted: ${expected}`,
+    );
+  }
+  assertSelfTest(
+    validateDeploymentSecurity({ ...valid, dockerfile: `${valid.dockerfile}\nEXPOSE 4000\n` })
+      .some((error) => error.includes("must not expose a server port")),
+    "CLI image with an obsolete server port accepted",
+  );
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,

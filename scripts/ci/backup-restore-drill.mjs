@@ -858,7 +858,7 @@ async function runManagedDrill() {
     backupKey.fill(0);
     if (containerId) {
       try {
-        await run("docker", ["rm", "-f", containerId], { capture: true });
+        await run("docker", ["rm", "-f", "--volumes", containerId], { capture: true });
       } catch {}
     }
     await fs.rm(workDir, { recursive: true, force: true });

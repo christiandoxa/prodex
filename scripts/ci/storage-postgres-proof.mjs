@@ -361,11 +361,11 @@ async function runWithManagedPostgres() {
   } finally {
     if (redisContainerId) {
       try {
-        await run("docker", ["rm", "-f", redisContainerId], { capture: true });
+        await run("docker", ["rm", "-f", "--volumes", redisContainerId], { capture: true });
       } catch {}
     }
     try {
-      await run("docker", ["rm", "-f", containerId], { capture: true });
+      await run("docker", ["rm", "-f", "--volumes", containerId], { capture: true });
     } catch {}
     await fs.rm(tlsDir, { recursive: true, force: true });
   }

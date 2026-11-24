@@ -1,19 +1,70 @@
-# Prodex Gateway Deployment
+# Prodex Containers and Legacy Deployment Reference
 
-This page describes the repository-provided container scaffold for running the
-dedicated `prodex-gateway` data-plane service.
+## Current CLI Container
 
-## Docker Compose
+The maintained `Dockerfile` builds the current `prodex` executable. The earlier
+enterprise gateway/control-plane executables and PostgreSQL/Redis application
+adapters were intentionally removed. The image therefore starts the CLI with
+`--help` by default; it does not start an HTTP service or expose a port.
 
-The container builder uses Rust 1.100.0, Python 3.15.2, uv 0.13.9, and Mojo
-1.2.0 on Debian 13 (trixie). The runtime uses the same Debian stable release
-with exact package versions; container bases are pinned by digest. The build
-includes the vendored Cargo patch and Mojo sources and requires compiled Mojo
-kernels. `CARGO_BUILD_JOBS` defaults to four and can be set with
-`docker compose build --build-arg CARGO_BUILD_JOBS=<jobs>`.
+```bash
+docker build -t prodex-cli:local .
+docker run --rm --network none prodex-cli:local --version
+docker run --rm --network none prodex-cli:local --help
+docker run --rm --network none --read-only \
+  --cap-drop ALL --security-opt no-new-privileges:true \
+  --tmpfs /var/lib/prodex:uid=10001,gid=10001,mode=0700 \
+  --tmpfs /var/log/prodex:uid=10001,gid=10001,mode=0700 \
+  --tmpfs /tmp:mode=1777 \
+  prodex-cli:local doctor --runtime --json
+```
 
-For an existing deployment, complete the database upgrade procedure below
-before starting the updated PostgreSQL or Redis service.
+These checks use disposable container storage and require no provider
+credentials. The image runs as UID 10001. For real CLI work, explicitly mount
+only the workspace and runtime state that the chosen command requires; the
+host's existing profiles are not mounted automatically. The `gateway` subcommand
+is the lean CLI gateway; it does not restore the retired enterprise service,
+admin API, database migrations, or control-plane capabilities.
+
+The builder uses Rust 1.100.0, Python 3.15.2, uv 0.13.9, and Mojo 1.2.0 on Debian
+13 (trixie). The runtime uses the same Debian stable release with exact package
+versions, and container bases are pinned by digest. The build includes the
+vendored Cargo patch and Mojo sources and requires compiled Mojo kernels.
+`CARGO_BUILD_JOBS` defaults to four; set `docker build --build-arg
+CARGO_BUILD_JOBS=<jobs> ...` to adjust build concurrency.
+
+## Status of Enterprise Templates
+
+`compose.yaml`, `deploy/compose-gateway-policy.toml`, and the Kubernetes manifests
+below are legacy enterprise templates, not a supported current application
+deployment. Their security constraints remain as historical template checks;
+they do not prove that the removed executables or storage adapters exist.
+Do not use their projected credentials, health probes, or migration commands as
+claims about the current lean gateway.
+
+The optional database images in the legacy Compose template are pinned to
+PostgreSQL 19.0 and Redis 8.12.0. Their version refresh does not migrate existing
+volumes or establish application integration. The isolated PostgreSQL image
+proof checks the pinned image's refusal of legacy data and initialization of a
+fresh volume:
+
+```bash
+node scripts/ci/storage-postgres-proof.mjs --image-upgrade-check
+```
+
+This command uses disposable tmpfs-backed containers, reads only the template's
+image/mount configuration, and does not start the Compose project or attach its
+named volumes. The full historical storage proof and backup drill still refer
+to removed adapters; they are not supported current application test suites.
+The existing-volume guidance below is for operators maintaining the historical
+stack separately and does not imply that this release restores it.
+
+## Legacy Docker Compose Reference (Unsupported)
+
+This section and the remaining enterprise deployment examples are historical
+reference only. Their dedicated binaries and application storage adapters are
+absent from the current workspace; these commands are not a supported deployment
+procedure for this release. Do not run the following stack with the CLI image.
 
 Copy the example environment file, create private secret files, then start the
 gateway. The environment file contains only file paths; Compose projects the

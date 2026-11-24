@@ -41,17 +41,13 @@ RUN useradd --create-home --uid 10001 prodex \
     && chown -R prodex:prodex /var/lib/prodex /var/log/prodex
 
 COPY --from=builder /workspace/target/release/prodex /usr/local/bin/prodex
-COPY --from=builder /workspace/target/release/prodex-gateway /usr/local/bin/prodex-gateway
-COPY --from=builder /workspace/target/release/prodex-control-plane /usr/local/bin/prodex-control-plane
 
 ENV PRODEX_HOME=/var/lib/prodex
 ENV PRODEX_RUNTIME_LOG_DIR=/var/log/prodex
 
 USER prodex
-EXPOSE 4000
+# This image runs a CLI command; it does not start an HTTP service by default.
+HEALTHCHECK NONE
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:4000/readyz || exit 1
-
-ENTRYPOINT ["/usr/local/bin/prodex-gateway"]
-CMD ["serve", "--listen", "0.0.0.0:4000"]
+ENTRYPOINT ["/usr/local/bin/prodex"]
+CMD ["--help"]
