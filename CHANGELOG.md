@@ -53,6 +53,14 @@ libraries are added.
 - Verify that the projected Docker build context resolves its local Cargo
   patch; a context missing the vendor directory must fail.
 
+## Windows Scan Review
+
+The Windows x64 artifact has one reviewed ClamAV `Win.Trojan.Virut-225`
+false positive in unchanged expression-destruction code. Acceptance is bound
+to this release and its exact SHA-256, with source, artifact, and smoke checks.
+Additional findings, scanner errors, different versions, and different bytes
+still block release. See the [review and exact artifact lineage](https://github.com/christiandoxa/prodex/blob/0.172.1/docs/supply-chain.md).
+
 ## Changelog
 
 ### Database Image Upgrades
