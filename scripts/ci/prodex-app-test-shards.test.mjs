@@ -290,7 +290,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(processGuard, /Swatinem\/rust-cache@/);
   assert.match(processGuard, /scripts\/ci\/static-guards-parallel\.mjs/);
   assert.equal(processGuard.includes("node scripts/docs/smart-context-evidence.mjs --check"), false);
-  assert.equal(processGuard.match(/if: matrix\.lane == 'static'/g)?.length, 6);
+  assert.equal(processGuard.match(/if: matrix\.lane == 'static'/g)?.length, 7);
   assert.match(processGuard, /Download runtime Mojo archive/);
   assert.doesNotMatch(
     workflow,
