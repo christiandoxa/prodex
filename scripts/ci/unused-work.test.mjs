@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
 import { RUNTIME_TEST_TAGS, RUNTIME_CI_TEST_CASES } from "./runtime-test-manifest.mjs";
@@ -81,4 +81,24 @@ test("native macOS CI and both release targets avoid the retiring runner pool", 
     assert.match(row, /can-mojo-runtime-smoke: true/);
   }
   assert.doesNotMatch(ci + release, /runs-on: macos-14/);
+});
+
+
+test("Cargo-backed container fixtures have one static CI owner with Rust and sccache", () => {
+  const fixtures = globSync("scripts/ci/container-build-context*.mjs");
+  assert.equal(fixtures.length, 1, "one maintained container context fixture suite is required");
+  const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+  const nodePatterns = manifest.scripts["test:node"].split(" ").filter((arg) => arg.endsWith(".test.mjs"));
+  const nodeFiles = globSync(nodePatterns).map((file) => file.replaceAll("\\", "/"));
+  const fixture = fixtures[0].replaceAll("\\", "/");
+  assert.ok(!nodeFiles.includes(fixture), "Cargo-backed fixtures must not run in the Node-only lane");
+
+  const staticRunner = readFileSync("scripts/ci/static-guards-parallel.mjs", "utf8");
+  const staticTests = [...staticRunner.matchAll(/\["[^"]+", "--test", "([^"]+)"\]/gu)].map((match) => match[1]);
+  assert.equal(staticTests.filter((file) => file === fixture).length, 1, "static guards must execute the container fixtures exactly once");
+  const processGuard = job(ci, "process-guard");
+  assert.match(processGuard, /RUSTC_WRAPPER: sccache/);
+  assert.match(processGuard, /name: Install Rust toolchain\n\s+if: matrix\.lane == 'static'\n\s+uses: dtolnay\/rust-toolchain@/);
+  assert.match(processGuard, /name: Install sccache\n\s+if: matrix\.lane == 'static'\n\s+uses: mozilla-actions\/sccache-action@/);
+  assert.match(processGuard, /name: Run independent static guards in parallel\n\s+if: matrix\.lane == 'static'\n\s+run: node scripts\/ci\/static-guards-parallel\.mjs/);
 });
