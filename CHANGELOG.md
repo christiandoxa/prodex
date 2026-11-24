@@ -2,57 +2,85 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.172.1 - 2026-11-24
+
+### Deps
+
+- Refresh stable Rust dependency graph (`3076d5a`)
+
+### Misc
+
+- Align packaging with current CLI targets (`3e3c1cc`)
+- Build strict Mojo images on stable dependencies (`da32122`)
+# Prodex 0.172.1
+
+Refresh stable dependencies, build tools, native-client smoke inputs, and
+container images while retaining the Codex 0.172.0 compatibility baseline.
+
+## New Features
+
+### Dependency and Toolchain Updates
+
+- Integrate Dependabot PR #136 for `astral-sh/setup-uv` 10.4.0.
+- Update the maintained Rust dependency declarations and both lockfiles to the
+  newest stable versions allowed by the supported dependency graph, including
+  Hyper 1.13.0, keyring-core 1.1.0, Redis 1.8.3, and Jiff 1.0.2.
+- Pin Node.js 26.13.1, npm 12.2.3, uv 0.13.9, and sccache 0.20.0. Retain the
+  current stable Rust 1.100.0, Python 3.15.2, and Mojo 1.2.0 toolchains.
+- Refresh the pinned security tools and image digests, including cargo-audit
+  0.23.0, cargo-deny 0.22.0, cargo-machete 0.10.1, Syft 1.57.2, and KICS 2.2.1.
+- Update native-client release smoke inputs to Gemini CLI 0.71.1, GitHub
+  Copilot CLI 1.0.114, and Claude Code 2.1.331.
+
+Upstream dependency constraints remain authoritative. Transitive dependencies
+that cannot resolve to a newer major version retain the versions required by
+their current stable parent crates. No external npm or Python application
+libraries are added.
+
+## Bug Fixes
+
+- Give compiler-cache initialization a bounded startup window before CI compiler
+  consumers run, and keep Cargo-dependent container checks in the Rust test lane.
+
+### Container Builds
+
+- Move the Rust builder and runtime bases to Debian 13 (trixie), with exact
+  image digests and runtime package versions.
+- Include the vendored Cargo patch and Mojo sources in the Docker build
+  context, install the pinned Mojo compiler, and require compiled Mojo kernels.
+- Package the current `prodex` executable and show CLI help by default. Remove
+  Docker references to the retired enterprise gateway and control-plane binaries.
+- Verify that the projected Docker build context resolves its local Cargo
+  patch; a context missing the vendor directory must fail.
+
+## Changelog
+
+### Database Image Upgrades
+
+The retained legacy Compose template pins PostgreSQL 19.0 and Redis 8.12.0.
+It documents the retired enterprise stack and is not a supported deployment
+for the current Prodex CLI image. See the [container and legacy database guidance](https://github.com/christiandoxa/prodex/blob/0.172.1/docs/deployment.md).
+
+The PostgreSQL image check verifies that its versioned mount rejects an old
+PostgreSQL 16 volume before initialization and can initialize a fresh database.
+These image checks do not restore the removed Prodex storage adapters. Preserve
+verified backups and original volumes when migrating an independently managed
+database.
+
+### Upstream Compatibility
+
+The standalone wrapper continues to use a separately installed
+[Codex CLI 0.172.0](https://github.com/openai/codex/releases/tag/rust-v0.172.0).
+The GPT-6.2 Sol/Astra catalog, proxy routing, native session resume forms, and
+Ornith goal-context adaptation retain their existing contracts.
+
+Full Changelog: [0.172.0...0.172.1](https://github.com/christiandoxa/prodex/compare/0.172.0...0.172.1)
+
 ## 0.172.0 - 2026-11-24
 
 ### Misc
 
 - Qualify native 0.172 compatibility (`88f4cbf`)
-# Prodex 0.172.0
-
-Qualify Codex CLI 0.172.0 and preserve native session, stream, and tool behavior.
-
-## New Features
-
-- Support the native Codex 0.172.0 session lifecycle, including saved conversation
-  links, slash-command argument completion, and agent command-center navigation.
-- Qualify saved permissions, working directories, and workspace roots for
-  `prodex exec resume`, together with cross-platform remote session paths.
-- Preserve native lazy startup for cached optional stdio MCP servers, per-tool
-  app approval reviewers, and the gRPC Code Mode host.
-
-## Bug Fixes
-
-- Classify `api_key_spend_limit_exceeded` as explicit quota exhaustion across
-  HTTP, SSE, and WebSocket routes. Eligible rotation remains limited to the
-  pre-commit phase; existing output and hard session affinity remain protected.
-- Upgrade `url` to 2.5.9 and its required `form_urlencoded` dependency to 1.2.3
-  to resolve RUSTSEC-2026-0592 without refreshing unrelated dependencies.
-
-## Windows Scan Review
-
-The Windows x64 artifact retains a reviewed ClamAV `Win.Trojan.Virut-225`
-false positive in unchanged expression-destruction code. Acceptance is bound
-to this version and its exact SHA-256, with source, artifact and smoke checks;
-all other findings and scanner errors still block release.
-See the [review and exact hash](https://github.com/christiandoxa/prodex/blob/0.172.0/docs/supply-chain.md).
-
-## Upstream Compatibility
-
-The standalone wrapper uses a separately installed [Codex CLI 0.172.0](https://github.com/openai/codex/releases/tag/rust-v0.172.0).
-Qualification uses the checksum-verified official Linux binary and source commit
-`3d86e43b075adeba2193ec5c22ac92f55afd82e6`.
-
-## Changelog
-
-- Refresh 13 native lifecycle schema hashes and preserve all 12 required RPC
-  methods. Seven schemas add distinct API-key, project, and organization
-  spend-limit error identities.
-- Extend source qualification to immediate stream errors, saved resume settings,
-  cross-platform paths, and native connector-result ownership and privacy gates.
-- Retain the GPT-6.2 Sol/Astra catalog, proxy routing, session resume forms, and
-  Ornith goal-context adaptation from previous releases.
-
-Full Changelog: [0.171.3...0.172.0](https://github.com/christiandoxa/prodex/compare/0.171.3...0.172.0)
 
 ## 0.171.3 - 2026-11-21
 
@@ -154,11 +182,3 @@ Full Changelog: [0.171.3...0.172.0](https://github.com/christiandoxa/prodex/comp
 ## 0.167.7 - 2026-11-11
 
 - No grouped changes.
-
-## 0.167.6 - 2026-11-11
-
-### Misc
-
-- Refresh optional-tool release qualification (`753be7e`)
-- Render local compaction warnings with terminal UI (`424e678`)
-- Improve local compaction observability (`6c83994`)
