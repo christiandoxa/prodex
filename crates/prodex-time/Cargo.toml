@@ -7,7 +7,7 @@ repository.workspace = true
 description = "Jiff-backed host timestamp compatibility boundary for Prodex"
 
 [dependencies]
-jiff = "=1.0.1"
+jiff = "=1.0.2"
 
 [lints]
 workspace = true

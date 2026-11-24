@@ -70,7 +70,7 @@ strip = "symbols"
 [workspace.dependencies]
 httpdate = "1.0.3"
 aes-gcm-siv = "0.12.1"
-anyhow = "1.0.104"
+anyhow = "1.0.105"
 argon2 = "0.6.0"
 arc-swap = "1.9.5"
 base64 = "0.23.1"
@@ -86,9 +86,9 @@ fs2 = "0.4.3"
 filetime = "0.2.30"
 getrandom = "0.4.3"
 http-body-util = "0.1.5"
-hyper = "1.12.0"
+hyper = "1.13.0"
 hyper-util = "0.1.21"
-keyring-core = "1.0.1"
+keyring-core = "1.1.0"
 libc = "0.2.191"
 os_info = "3.15.0"
 pbkdf2 = "0.13.0"
@@ -136,7 +136,7 @@ rpassword = "7.5.5"
 crossterm = "0.29.0"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
 postgres = "0.19.14"
-redis = { version = "1.8.2", default-features = false }
+redis = { version = "1.8.3", default-features = false }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-native-certs = "0.8.5"
 tokio-rustls = "0.26.6"
@@ -154,7 +154,7 @@ tiny_http = "0.12.0"
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tokio-postgres = "=0.7.18"
 tokio-postgres-rustls = { version = "0.14.0", features = ["aws-lc-rs"] }
-toml = "1.2.1"
+toml = "1.2.2"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 uuid = { version = "1.29.3", features = ["serde", "v7"] }
 url = "2.5.9"

@@ -21,7 +21,7 @@ sha2 = { workspace = true }
 zeroize = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
+apple-native-keyring-store = { version = "1.0.3", features = ["keychain"] }
 
 [target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
 dbus-secret-service-keyring-store = { version = "1.0.1", features = ["crypto-rust", "vendored"] }
