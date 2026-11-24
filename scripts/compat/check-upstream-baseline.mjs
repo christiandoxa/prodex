@@ -11,6 +11,10 @@ const DEFAULT_SCHEMA_FIXTURE_PATH = path.join(
 );
 
 const REQUIRED_CRITICAL_FILES = [
+  "codex-rs/core/src/thread_manager.rs",
+  "codex-rs/core/src/connectors.rs",
+  "codex-rs/config/src/types.rs",
+  "codex-rs/app-server-protocol/src/protocol/v2/permissions.rs",
   "codex-rs/protocol/src/items/display.rs",
   "codex-rs/codex-api/src/requests/headers.rs",
   "codex-rs/rmcp-client/src/oauth.rs",
@@ -126,6 +130,35 @@ const REQUIRED_CRITICAL_FILES = [
 ];
 
 const REQUIRED_FILE_CONTAINS = {
+  "codex-rs/core/src/thread_manager.rs": [
+    "let provider = Arc::new(ProcessOwnedGrpcCodeModeSessionProvider::with_host_program(",
+    "Feature::CodeModeHostOutputTruncation",
+    "Arc::new(LocalServerOutputProvider { inner: provider })"
+  ],
+  "codex-rs/core/src/connectors.rs": [
+    "if model.is_some_and(|model| requirements.auto_review_required_for_model(model))",
+    "return ApprovalsReviewer::AutoReview;",
+    "tool.and_then(|(name, title)| app?.tools.as_ref()?.for_tool(name, title))",
+    ".and_then(|tool| tool.approvals_reviewer)",
+    ".and_then(|link| link.approvals_reviewer)",
+    ".or_else(|| app.and_then(|app| app.approvals_reviewer))"
+  ],
+  "codex-rs/config/src/types.rs": [
+    "pub struct AppToolConfig {",
+    "pub approvals_reviewer: Option<ApprovalsReviewer>,",
+    "pub fn for_tool(&self, name: &str, title: Option<&str>)",
+    "self.tools\n            .get(name)\n            .or_else(|| title.and_then(|title| self.tools.get(title)))"
+  ],
+  "codex-rs/app-server-protocol/src/protocol/v2/permissions.rs": [
+    "writable_roots: Vec<LegacyAppPathString>,",
+    "pub fn permission_profile_template(",
+    "pub fn permission_profile_for_cwd(",
+    "PermissionProfile::workspace_write_with_path_uris(",
+    "pub fn try_to_core(&self) -> io::Result<codex_protocol::protocol::SandboxPolicy>",
+    "if !path.is_absolute()",
+    "writable root is not absolute: {}",
+    "AbsolutePathBuf::from_absolute_path_checked(path)"
+  ],
   "codex-rs/protocol/src/items/display.rs": [
     "pub struct AgentMessageDisplayVersion;",
     "_ => Err(\"unsupported answer display version\")",
@@ -238,9 +271,6 @@ const REQUIRED_FILE_CONTAINS = {
     ".mut_subcommands(localize_config_arg)"
   ],
   "codex-rs/core/src/client.rs": [
-    "Ok(ResponseEvent::OutputItemDone(mut item)) => {",
-    "provider.normalize_completed_output_item(&mut item);",
-
     "build_responses_headers",
     "build_responses_compatibility_headers",
     "build_ws_client_metadata",
@@ -268,19 +298,21 @@ const REQUIRED_FILE_CONTAINS = {
     "x-openai-internal-codex-responses-lite",
     "WS_REQUEST_HEADER_RESPONSES_LITE_CLIENT_METADATA_KEY",
     "ws_request_header_x_openai_internal_codex_responses_lite",
-    "X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY",
-    "x-codex-ws-stream-request-start-ms",
     "x-codex-beta-features",
+    "X_CODEX_ROUTING_HINT_HEADER",
+    "x-codex-routing-hint",
     "OPENAI_BETA_HEADER",
     "responses_websockets=2026-02-06",
     "x-client-request-id",
     "stream_responses_websocket",
+    "client_metadata",
+    "X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY",
+    "x-codex-ws-stream-request-start-ms",
+    "prepare_response_items_for_request",
+    "responses_request_properties_mismatch",
     "auth_owner: Option<AuthOwner>",
     "take_cached_websocket_session",
     "build_responses_request",
-    "client_metadata",
-    "prepare_response_items_for_request",
-    "responses_request_properties_mismatch",
     "responses_session_id",
     "session_source.is_non_root_agent()",
     "self.session_derived_cache_key(metadata)",
@@ -304,9 +336,26 @@ const REQUIRED_FILE_CONTAINS = {
     "!owner.is_current()",
     "self.turn_state = Arc::new(OnceLock::new());",
     "prompt_cache_options_changed",
+    "Ok(ResponseEvent::OutputItemDone(mut item)) => {",
+    "provider.normalize_completed_output_item(&mut item);",
     "fn prepare_response_items_for_request(&self, input: &mut [ResponseItem])",
     ".is_some_and(|id| id.allocation().is_none() && !id.is_prefixed())",
     "item.set_id(/*new_id*/ None);",
+    "fn sampling_result_destination(",
+    "if !include_internal\n        || !responses_headers.is_empty()",
+    ".is_some_and(|params| !params.is_empty())",
+    ".filter(|owner| owner.is_current())?",
+    "Some(CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_))",
+    "is_local_connector_result_gateway(&setup.api_provider.base_url)",
+    "codex_model_provider_info::CHATGPT_CODEX_BASE_URL",
+    "ExecutedToolCalls::is_result_body_provider_header(name.as_str())",
+    "fn sampling_result_bodies(",
+    "matches!(metadata.request_kind, Some(CodexResponsesRequestKind::Turn))",
+    "return turn.for_input(input, &destination.owner);",
+    "options.tool_results = self.client.sampling_result_bodies(",
+    "let result_body_destination = if warmup {\n                None",
+    "payload.tool_results = self.client.sampling_result_bodies(",
+    "payload.input,"
   ],
   "codex-rs/core/src/compact_remote_v2.rs": [
     "run_remote_compact_task",
@@ -569,9 +618,6 @@ const REQUIRED_FILE_CONTAINS = {
     "spawn_response_stream",
     "process_sse",
     "process_responses_event",
-    "treatment_from_headers",
-    "SafetyBufferingTreatment",
-    "with_treatment",
     "x-codex-turn-state",
     "response.completed",
     "response.failed",
@@ -583,10 +629,12 @@ const REQUIRED_FILE_CONTAINS = {
     "SafetyBuffering",
     "safety_buffering",
     "ResponseEvent::SafetyBuffering",
-    "pub(crate) fn metadata_events(",
-    "safety_buffering.map(ResponseEvent::SafetyBuffering)",
+    "treatment_from_headers",
+    "SafetyBufferingTreatment",
+    "with_treatment",
     "invalid_prompt",
     "ApiError::InvalidPrompt",
+    "parse_failed_response",
     "response.output_item.added",
     "phase",
     "MessagePhase::PartialAnswer",
@@ -597,26 +645,37 @@ const REQUIRED_FILE_CONTAINS = {
     "ApiError::ResponseIncomplete(",
     "response_id,",
     "token_usage,",
+    "pub(crate) fn metadata_events(",
+    "safety_buffering.map(ResponseEvent::SafetyBuffering)",
+    "if let Some(error) = parse_error_event(event.error.as_ref(), event.headers.as_ref())",
+    "return Err(ResponsesEventError::Api(error));",
+    "Err(error) => {\n                let _ = tx_event.send(Err(error.into_api_error())).await;\n                return;",
+    "let error = ApiError::Stream(\"stream closed before response.completed\".into());"
   ],
   "codex-rs/codex-api/src/sse/responses_error.rs": [
     "parse_failed_response",
-    "insufficient_quota",
-    "credit_balance_exhausted",
-    "organization_spend_limit_exceeded",
-    "project_spend_limit_exceeded",
     "rate_limit_exceeded",
     "slow_down",
     "server_is_overloaded",
-    "policy_capacity_unavailable",
-    "ApiError::PolicyCapacityUnavailable",
-    "invalid_prompt",
-    "ApiError::InvalidPrompt",
+    "ApiError::RateLimitExceeded",
+    "ApiError::ServerOverloaded",
     "json_headers_to_http_headers",
-    "let retry_after_header = error",
     ".and_then(|error| error.get(\"headers\"))",
     "RetryAfter::from_headers(&json_headers_to_http_headers(headers))",
-    "retry_after_header\n                .or_else",
     "Duration::try_from_secs_f64(value).ok()",
+    "retry_after_header\n                .or_else",
+    "policy_capacity_unavailable",
+    "ApiError::PolicyCapacityUnavailable",
+    "fn retry_after_header(headers: Option<&Value>)",
+    "let retry_after_header = retry_after_header(error.and_then(|error| error.get(\"headers\")));",
+    "pub(super) fn parse_error_event(",
+    "parse_terminal_provider_error(error, /*status*/ None)",
+    "\"policy_capacity_unavailable\" | \"server_is_overloaded\"",
+    "retry_after_header(error.get(\"headers\")).or_else(|| retry_after_header(headers))",
+    "ApiError::PolicyCapacityUnavailable { retry_after }",
+    "ApiError::ServerOverloaded { retry_after }",
+    "_ => None,",
+    "Some(\"rate_limit_exceeded\" | \"slow_down\")"
   ],
   "codex-rs/codex-api/src/endpoint/responses.rs": [
     "ResponsesClient",
@@ -666,12 +725,16 @@ const REQUIRED_FILE_CONTAINS = {
     "large_turn_is_one_text_message_in_bounded_frames",
     ".get(X_CODEX_WEBSOCKET_MAX_MESSAGE_BYTES_HEADER)",
     ".and_then(|value| value.parse::<usize>().ok());",
-    ".is_some_and(|limit| request_text.len() > limit)",
+    ".is_some_and(|limit| request_text.text.len() > limit)",
     "let mut received_text = false;",
     "received_text = true;",
     "Message::Close(Some(frame)) if frame.code == CloseCode::Size && !received_text",
     "return Err(ApiError::WebsocketMessageTooLarge);",
     "x-codex-websocket-max-message-bytes",
+    "struct WsRequestText {\n    text: Utf8Bytes,\n    private: bool,",
+    "on_encoded(request_text.as_ref());\n        let enriched = with_tool_results(request_text.as_str(), &ws_request.tool_results);",
+    "private: enriched.is_some(),",
+    "if request.private {\n                                    send.with_subscriber(tracing::Dispatch::none()).await"
   ],
   "codex-rs/core/src/context/base_instructions.rs": [
     "pub(crate) const KIND: &str = \"model.base_instructions\";",
@@ -745,10 +808,6 @@ const REQUIRED_FILE_CONTAINS = {
     "normalize_lookup_key",
   ],
   "codex-rs/core/src/config/mod.rs": [
-    "if features.enabled(Feature::MemoryTool)\n            && memories.version.is_none()",
-    "&& memories.dual_write != Some(false)",
-    "tokio::fs::try_exists(codex_home.join(MemoryVersion::V1.directory_name())).await",
-    "memories.version = Some(MemoryVersion::V2)",
     "respect_system_proxy",
     "Feature::RespectSystemProxy",
     "resolve_bootstrap_respect_system_proxy",
@@ -757,13 +816,20 @@ const REQUIRED_FILE_CONTAINS = {
     "OutboundProxyPolicy::RespectSystemProxy",
     "features.enabled",
     "feature_requirements",
+    "if features.enabled(Feature::MemoryTool)\n            && memories.version.is_none()",
+    "&& memories.dual_write != Some(false)",
+    "tokio::fs::try_exists(codex_home.join(MemoryVersion::V1.directory_name())).await",
+    "memories.version = Some(MemoryVersion::V2)",
+    "let restore_persisted_profile = sandbox_mode.is_none()",
+    "&& default_permissions_override.is_none()",
+    "&& persisted_permission_profile_id.is_none();",
+    "The saved read-only permission profile is disallowed by requirements. Select a permission profile explicitly to continue.",
+    "permission_profile.intersect_with_read_only().ok_or_else",
+    "saved_file_system.preserve_deny_read_restrictions_from(&file_system_sandbox_policy);",
+    "Could not load saved permission profile `{profile_id}`: {err}. Select a permission profile explicitly to continue.",
+    "default_permissions_override.or(persisted_profile_id.map(|(profile_id, _)| profile_id))"
   ],
   "codex-rs/features/src/lib.rs": [
-    "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-    "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-    "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-    "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-    "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
     "RespectSystemProxy",
     "respect_system_proxy",
     "key: \"respect_system_proxy\"",
@@ -777,7 +843,16 @@ const REQUIRED_FILE_CONTAINS = {
     "default_enabled: false",
     "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::InstantInterrupt,\n        key: \"instant_interrupt\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: true,",
+    "id: Feature::ReasoningEffortOverride,\n        key: \"reasoning_effort_override\",\n        stage: Stage::Stable,\n        default_enabled: true",
+    "id: Feature::DeferredToolWorldState,\n        key: \"deferred_tool_world_state\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+    "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+    "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+    "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,",
     "id: Feature::MultiEnvironmentMcp,\n        key: \"multi_environment_mcp\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,",
+    "id: Feature::McpLazyStdioStartup,\n        key: \"mcp_lazy_stdio_startup\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+    "id: Feature::CodeModeHostGrpc,\n        key: \"code_mode_host_grpc\",\n        stage: Stage::Removed,\n        default_enabled: false,",
+    "`[features].code_mode_host_grpc` is deprecated and ignored.",
+    "self.record_legacy_usage_force(\n                        \"features.code_mode_host_grpc\","
   ],
   "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs": [
     "McpServerEventStreamStartParams",
@@ -932,6 +1007,18 @@ const REQUIRED_FILE_CONTAINS = {
     "set_project_trust_level(project.trust_key, TrustLevel::Trusted)",
     "default_cwd: Some(config.cwd.clone())",
     "warning: Untrusted project-local configuration is disabled",
+    "let mut explicit_permissions = overrides.sandbox_mode.is_some();",
+    "ConfigLayerSource::SessionFlags",
+    "profile: Some(_),",
+    "cwd: (overrides.cwd.is_some() || runtime_workspace_roots.is_some())",
+    "sandbox: sandbox.filter(|_| explicit_permissions)",
+    "permissions: permissions.filter(|_| explicit_permissions)",
+    "first_turn_cwd = None;",
+    "resumed_workspace_roots = Some(permissions.workspace_roots);",
+    "if !overrides.additional_writable_roots.is_empty()",
+    "first_turn_workspace_roots = Some(roots);",
+    "cwd: first_turn_cwd,",
+    "runtime_workspace_roots: first_turn_workspace_roots,"
   ],
   "codex-rs/protocol/src/protocol.rs": [
     "pub enum ThreadSource",
@@ -978,10 +1065,6 @@ const REQUIRED_FILE_CONTAINS = {
     "ServerNotification",
   ],
   "codex-rs/app-server-protocol/src/protocol/v2/thread.rs": [
-    "#[experimental(\"thread/fork.attachToSource\")]",
-    "pub attach_to_source: bool",
-    "#[experimental(\"thread/list.attachedToThreadId\")]",
-    "pub attached_to_thread_id: Option<String>",
     "ThreadStartParams",
     "ThreadForkParams",
     "pub thread_source: Option<ThreadSource>",
@@ -995,6 +1078,16 @@ const REQUIRED_FILE_CONTAINS = {
     "Anchor(ThreadItemsListAnchor)",
     "ThreadItemsListAnchor",
     "item_id: String",
+    "#[experimental(\"thread/fork.attachToSource\")]",
+    "pub attach_to_source: bool",
+    "#[experimental(\"thread/list.attachedToThreadId\")]",
+    "pub attached_to_thread_id: Option<String>",
+    "pub cwd: LegacyAppPathString,",
+    "pub runtime_workspace_roots: Option<Vec<LegacyAppPathString>>,",
+    "pub runtime_workspace_roots: Vec<LegacyAppPathString>,",
+    "#[schemars(with = \"codex_utils_absolute_path::AbsolutePathBuf\")]",
+    "#[schemars(with = \"Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>\")]",
+    "#[schemars(with = \"Vec<codex_utils_absolute_path::AbsolutePathBuf>\")]"
   ],
   "codex-rs/app-server-protocol/src/protocol/v2/turn.rs": [
     "pub parent_turn_id: Option<String>",
@@ -1249,12 +1342,16 @@ const REQUIRED_FILE_CONTAINS = {
       "err.kind() == std::io::ErrorKind::NotFound && retries_remaining > 0"
   ],
   "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs": [
-      "pub(super) fn latest_persisted_model_settings",
-      "InitialHistory::Resumed(history)",
-      "EventMsg::ThreadSettingsApplied(event)",
-      "thread_id == history.conversation_id",
-      "Some(_) => crossed_foreign_snapshot = true",
-      "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)"
+    "pub(super) fn latest_persisted_model_settings",
+    "InitialHistory::Resumed(history)",
+    "EventMsg::ThreadSettingsApplied(event)",
+    "thread_id == history.conversation_id",
+    "Some(_) => crossed_foreign_snapshot = true",
+    "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)",
+    "fn unattributed_read_only_profile(",
+    "let read_only = PermissionProfile::read_only();",
+    "(active_profile.is_none() && *profile == read_only).then_some(read_only)",
+    "unnamed_permission_profile: if event.thread_id.is_none()"
   ],
   "codex-rs/model-provider/src/gcp/mod.rs": [
     "struct GcpModelProvider",
@@ -1286,7 +1383,23 @@ const REQUIRED_FILE_CONTAINS = {
     "\"model_not_found\"",
     "None | Some(StatusCode::BAD_REQUEST | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND)",
     "Some(ApiError::ModelNotFound {",
-    "unwrap_or(code)"
+    "unwrap_or(code)",
+    "insufficient_quota",
+    "credit_balance_exhausted",
+    "organization_spend_limit_exceeded",
+    "project_spend_limit_exceeded",
+    "invalid_prompt",
+    "ApiError::QuotaExceeded",
+    "ApiError::InvalidPrompt",
+    "parse_terminal_provider_error",
+    "(\"insufficient_quota\" | \"credit_balance_exhausted\", None)",
+    "Some(ApiError::QuotaExceeded)",
+    "(\"api_key_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+    "Some(ApiError::SpendLimitExceeded(SpendLimitScope::ApiKey))",
+    "(\"project_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+    "Some(ApiError::SpendLimitExceeded(SpendLimitScope::Project))",
+    "(\"organization_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+    "Some(ApiError::SpendLimitExceeded(SpendLimitScope::Organization))"
   ],
   "codex-rs/protocol/src/error.rs": [
     "| CodexErrorDetails::ModelNotFound { .. }",
@@ -1305,6 +1418,13 @@ const REQUIRED_FILE_CONTAINS = {
     "pub fn requires_http_fallback(&self) -> bool",
     "matches!(self.retry_policy(), RetryPolicy::FallBackToHttp)",
     "CodexErrorDetails::WebsocketMessageTooLarge => RetryPolicy::FallBackToHttp,",
+    "pub enum SpendLimitScope {\n    ApiKey,\n    Project,\n    Organization,",
+    "APISpendLimitExceeded(SpendLimitScope)",
+    "| CodexErrorDetails::APISpendLimitExceeded(_)",
+    "CodexErrorDetails::APISpendLimitExceeded(SpendLimitScope::ApiKey)",
+    "CodexErrorInfo::ApiKeySpendLimitExceeded",
+    "CodexErrorInfo::ProjectSpendLimitExceeded",
+    "CodexErrorInfo::OrganizationSpendLimitExceeded"
   ],
   "codex-rs/rmcp-client/src/request_cancellation.rs": [
     "struct CancelOnDrop",
@@ -1490,18 +1610,224 @@ const COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS = 2;
 
 const REQUIRED_SEMANTIC_CHECKS = [
   {
+    "id": "responses.statusless-retry-errors",
+    "kind": "retry_metadata",
+    "file": "codex-rs/codex-api/src/sse/responses_error.rs",
+    "file_contains_all": [
+      "pub(super) fn parse_error_event(",
+      "parse_terminal_provider_error(error, /*status*/ None)",
+      "\"policy_capacity_unavailable\" | \"server_is_overloaded\"",
+      "retry_after_header(error.get(\"headers\")).or_else(|| retry_after_header(headers))",
+      "ApiError::PolicyCapacityUnavailable { retry_after }",
+      "ApiError::ServerOverloaded { retry_after }",
+      "_ => None,",
+      "Some(\"rate_limit_exceeded\" | \"slow_down\")"
+    ]
+  },
+  {
+    "id": "responses.immediate-stream-errors",
+    "kind": "stream_lifecycle",
+    "file": "codex-rs/codex-api/src/sse/responses.rs",
+    "file_contains_all": [
+      "if let Some(error) = parse_error_event(event.error.as_ref(), event.headers.as_ref())",
+      "return Err(ResponsesEventError::Api(error));",
+      "Err(error) => {\n                let _ = tx_event.send(Err(error.into_api_error())).await;\n                return;",
+      "let error = ApiError::Stream(\"stream closed before response.completed\".into());"
+    ]
+  },
+  {
+    "id": "responses.scoped-spend-limits",
+    "kind": "retry_lifecycle",
+    "file": "codex-rs/protocol/src/error.rs",
+    "file_contains_all": [
+      "pub enum SpendLimitScope {\n    ApiKey,\n    Project,\n    Organization,",
+      "APISpendLimitExceeded(SpendLimitScope)",
+      "| CodexErrorDetails::APISpendLimitExceeded(_)",
+      "CodexErrorDetails::APISpendLimitExceeded(SpendLimitScope::ApiKey)",
+      "CodexErrorInfo::ApiKeySpendLimitExceeded",
+      "CodexErrorInfo::ProjectSpendLimitExceeded",
+      "CodexErrorInfo::OrganizationSpendLimitExceeded"
+    ]
+  },
+  {
+    "id": "exec.resume-saved-settings",
+    "kind": "thread_lifecycle",
+    "file": "codex-rs/exec/src/lib.rs",
+    "file_contains_all": [
+      "let mut explicit_permissions = overrides.sandbox_mode.is_some();",
+      "ConfigLayerSource::SessionFlags",
+      "profile: Some(_),",
+      "cwd: (overrides.cwd.is_some() || runtime_workspace_roots.is_some())",
+      "sandbox: sandbox.filter(|_| explicit_permissions)",
+      "permissions: permissions.filter(|_| explicit_permissions)",
+      "first_turn_cwd = None;",
+      "resumed_workspace_roots = Some(permissions.workspace_roots);",
+      "if !overrides.additional_writable_roots.is_empty()",
+      "first_turn_workspace_roots = Some(roots);",
+      "cwd: first_turn_cwd,",
+      "runtime_workspace_roots: first_turn_workspace_roots,"
+    ]
+  },
+  {
+    "id": "resume.saved-profile-enforcement",
+    "kind": "permission_lifecycle",
+    "file": "codex-rs/core/src/config/mod.rs",
+    "file_contains_all": [
+      "let restore_persisted_profile = sandbox_mode.is_none()",
+      "&& default_permissions_override.is_none()",
+      "&& persisted_permission_profile_id.is_none();",
+      "The saved read-only permission profile is disallowed by requirements. Select a permission profile explicitly to continue.",
+      "permission_profile.intersect_with_read_only().ok_or_else",
+      "saved_file_system.preserve_deny_read_restrictions_from(&file_system_sandbox_policy);",
+      "Could not load saved permission profile `{profile_id}`: {err}. Select a permission profile explicitly to continue.",
+      "default_permissions_override.or(persisted_profile_id.map(|(profile_id, _)| profile_id))"
+    ]
+  },
+  {
+    "id": "resume.unattributed-read-only",
+    "kind": "permission_lifecycle",
+    "file": "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs",
+    "file_contains_all": [
+      "fn unattributed_read_only_profile(",
+      "let read_only = PermissionProfile::read_only();",
+      "(active_profile.is_none() && *profile == read_only).then_some(read_only)",
+      "unnamed_permission_profile: if event.thread_id.is_none()"
+    ]
+  },
+  {
+    "id": "app-server.remote-thread-paths",
+    "kind": "wire_contract",
+    "file": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+    "file_contains_all": [
+      "pub cwd: LegacyAppPathString,",
+      "pub runtime_workspace_roots: Option<Vec<LegacyAppPathString>>,",
+      "pub runtime_workspace_roots: Vec<LegacyAppPathString>,",
+      "#[schemars(with = \"codex_utils_absolute_path::AbsolutePathBuf\")]",
+      "#[schemars(with = \"Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>\")]",
+      "#[schemars(with = \"Vec<codex_utils_absolute_path::AbsolutePathBuf>\")]"
+    ]
+  },
+  {
+    "id": "app-server.remote-writable-roots",
+    "kind": "permission_lifecycle",
+    "file": "codex-rs/app-server-protocol/src/protocol/v2/permissions.rs",
+    "file_contains_all": [
+      "writable_roots: Vec<LegacyAppPathString>,",
+      "pub fn permission_profile_template(",
+      "pub fn permission_profile_for_cwd(",
+      "PermissionProfile::workspace_write_with_path_uris(",
+      "pub fn try_to_core(&self) -> io::Result<codex_protocol::protocol::SandboxPolicy>",
+      "if !path.is_absolute()",
+      "writable root is not absolute: {}",
+      "AbsolutePathBuf::from_absolute_path_checked(path)"
+    ]
+  },
+  {
+    "id": "features.lazy-stdio-mcp-default",
+    "kind": "feature_gate",
+    "file": "codex-rs/features/src/lib.rs",
+    "file_contains_all": [
+      "id: Feature::McpLazyStdioStartup,\n        key: \"mcp_lazy_stdio_startup\",\n        stage: Stage::Stable,\n        default_enabled: true,"
+    ]
+  },
+  {
+    "id": "features.code-mode-grpc-removed",
+    "kind": "feature_gate",
+    "file": "codex-rs/features/src/lib.rs",
+    "file_contains_all": [
+      "id: Feature::CodeModeHostGrpc,\n        key: \"code_mode_host_grpc\",\n        stage: Stage::Removed,\n        default_enabled: false,",
+      "`[features].code_mode_host_grpc` is deprecated and ignored.",
+      "self.record_legacy_usage_force(\n                        \"features.code_mode_host_grpc\","
+    ]
+  },
+  {
+    "id": "code-mode.grpc-host",
+    "kind": "runtime_lifecycle",
+    "file": "codex-rs/core/src/thread_manager.rs",
+    "file_contains_all": [
+      "let provider = Arc::new(ProcessOwnedGrpcCodeModeSessionProvider::with_host_program(",
+      "Feature::CodeModeHostOutputTruncation",
+      "Arc::new(LocalServerOutputProvider { inner: provider })"
+    ]
+  },
+  {
+    "id": "apps.tool-reviewer-config",
+    "kind": "configuration",
+    "file": "codex-rs/config/src/types.rs",
+    "file_contains_all": [
+      "pub struct AppToolConfig {",
+      "pub approvals_reviewer: Option<ApprovalsReviewer>,",
+      "pub fn for_tool(&self, name: &str, title: Option<&str>)",
+      "self.tools\n            .get(name)\n            .or_else(|| title.and_then(|title| self.tools.get(title)))"
+    ]
+  },
+  {
+    "id": "apps.tool-reviewer-precedence",
+    "kind": "permission_lifecycle",
+    "file": "codex-rs/core/src/connectors.rs",
+    "file_contains_all": [
+      "if model.is_some_and(|model| requirements.auto_review_required_for_model(model))",
+      "return ApprovalsReviewer::AutoReview;",
+      "tool.and_then(|(name, title)| app?.tools.as_ref()?.for_tool(name, title))",
+      ".and_then(|tool| tool.approvals_reviewer)",
+      ".and_then(|link| link.approvals_reviewer)",
+      ".or_else(|| app.and_then(|app| app.approvals_reviewer))"
+    ]
+  },
+  {
+    "id": "responses.connector-result-destination",
+    "kind": "capability_gate",
+    "file": "codex-rs/core/src/client.rs",
+    "file_contains_all": [
+      "fn sampling_result_destination(",
+      "if !include_internal\n        || !responses_headers.is_empty()",
+      ".is_some_and(|params| !params.is_empty())",
+      ".filter(|owner| owner.is_current())?",
+      "Some(CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_))",
+      "is_local_connector_result_gateway(&setup.api_provider.base_url)",
+      "codex_model_provider_info::CHATGPT_CODEX_BASE_URL",
+      "ExecutedToolCalls::is_result_body_provider_header(name.as_str())"
+    ]
+  },
+  {
+    "id": "responses.connector-result-ownership",
+    "kind": "request_metadata",
+    "file": "codex-rs/core/src/client.rs",
+    "file_contains_all": [
+      "fn sampling_result_bodies(",
+      "matches!(metadata.request_kind, Some(CodexResponsesRequestKind::Turn))",
+      "return turn.for_input(input, &destination.owner);",
+      "options.tool_results = self.client.sampling_result_bodies(",
+      "let result_body_destination = if warmup {\n                None",
+      "payload.tool_results = self.client.sampling_result_bodies(",
+      "payload.input,"
+    ]
+  },
+  {
+    "id": "websocket.private-connector-results",
+    "kind": "transport_metadata",
+    "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    "file_contains_all": [
+      "struct WsRequestText {\n    text: Utf8Bytes,\n    private: bool,",
+      "on_encoded(request_text.as_ref());\n        let enriched = with_tool_results(request_text.as_str(), &ws_request.tool_results);",
+      "private: enriched.is_some(),",
+      "if request.private {\n                                    send.with_subscriber(tracing::Dispatch::none()).await",
+      ".is_some_and(|limit| request_text.text.len() > limit)"
+    ]
+  },
+  {
     "id": "websocket.size-rejection-fallback",
     "kind": "transport_fallback",
     "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
     "file_contains_all": [
       ".get(X_CODEX_WEBSOCKET_MAX_MESSAGE_BYTES_HEADER)",
       ".and_then(|value| value.parse::<usize>().ok());",
-      ".is_some_and(|limit| request_text.len() > limit)",
+      ".is_some_and(|limit| request_text.text.len() > limit)",
       "let mut received_text = false;",
       "received_text = true;",
       "Message::Close(Some(frame)) if frame.code == CloseCode::Size && !received_text",
       "return Err(ApiError::WebsocketMessageTooLarge);",
-      "x-codex-websocket-max-message-bytes",
+      "x-codex-websocket-max-message-bytes"
     ]
   },
   {
@@ -2155,18 +2481,20 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
-    id: "sse.quota-codes",
-    kind: "co_occurrence",
-    file: "codex-rs/codex-api/src/sse/responses_error.rs",
-    file_contains_all: [
-      "insufficient_quota",
-      "credit_balance_exhausted",
-      "organization_spend_limit_exceeded",
-      "project_spend_limit_exceeded",
-      "rate_limit_exceeded",
-      "slow_down",
-      "server_is_overloaded",
-    ],
+    "id": "sse.quota-codes",
+    "kind": "co_occurrence",
+    "file": "codex-rs/codex-api/src/error.rs",
+    "file_contains_all": [
+      "parse_terminal_provider_error",
+      "(\"insufficient_quota\" | \"credit_balance_exhausted\", None)",
+      "Some(ApiError::QuotaExceeded)",
+      "(\"api_key_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+      "Some(ApiError::SpendLimitExceeded(SpendLimitScope::ApiKey))",
+      "(\"project_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+      "Some(ApiError::SpendLimitExceeded(SpendLimitScope::Project))",
+      "(\"organization_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+      "Some(ApiError::SpendLimitExceeded(SpendLimitScope::Organization))"
+    ]
   },
   {
     "id": "web-search.custom-provider-capability",
@@ -2702,17 +3030,17 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
-    id: "responses.failed-retry-after",
-    kind: "retry_metadata",
-    file: "codex-rs/codex-api/src/sse/responses_error.rs",
-    file_contains_all: [
+    "id": "responses.failed-retry-after",
+    "kind": "retry_metadata",
+    "file": "codex-rs/codex-api/src/sse/responses_error.rs",
+    "file_contains_all": [
       "parse_failed_response",
-      "let retry_after_header = error",
-      ".and_then(|error| error.get(\"headers\"))",
+      "fn retry_after_header(headers: Option<&Value>)",
+      "let retry_after_header = retry_after_header(error.and_then(|error| error.get(\"headers\")));",
       "RetryAfter::from_headers(&json_headers_to_http_headers(headers))",
       "retry_after_header\n                .or_else",
-      "Duration::try_from_secs_f64(value).ok()",
-    ],
+      "Duration::try_from_secs_f64(value).ok()"
+    ]
   },
   {
     id: "websocket.error-retry-after",
@@ -4107,6 +4435,23 @@ function runSelfTest() {
 
   // Retained and newly qualified contracts must reject the loss of a source marker.
   for (const id of [
+    "responses.statusless-retry-errors",
+    "responses.immediate-stream-errors",
+    "responses.scoped-spend-limits",
+    "exec.resume-saved-settings",
+    "resume.saved-profile-enforcement",
+    "resume.unattributed-read-only",
+    "app-server.remote-thread-paths",
+    "app-server.remote-writable-roots",
+    "features.lazy-stdio-mcp-default",
+    "features.code-mode-grpc-removed",
+    "code-mode.grpc-host",
+    "apps.tool-reviewer-config",
+    "apps.tool-reviewer-precedence",
+    "responses.connector-result-destination",
+    "responses.connector-result-ownership",
+    "websocket.private-connector-results",
+    "sse.quota-codes",
     "websocket.size-rejection-fallback",
     "responses.immediate-http-fallback",
     "responses.http-fallback-error-classification",

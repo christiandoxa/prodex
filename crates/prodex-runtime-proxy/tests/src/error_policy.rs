@@ -108,6 +108,10 @@ fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_status
         ("insufficient_quota", "Quota exhausted"),
         ("credit_balance_exhausted", "Credit balance exhausted"),
         (
+            "api_key_spend_limit_exceeded",
+            "API key spend limit exceeded",
+        ),
+        (
             "organization_spend_limit_exceeded",
             "Organization spend limit exceeded",
         ),
@@ -330,6 +334,7 @@ fn explicit_quota_codes_rotate_only_before_commit() {
     for code in [
         "insufficient_quota",
         "credit_balance_exhausted",
+        "api_key_spend_limit_exceeded",
         "organization_spend_limit_exceeded",
         "project_spend_limit_exceeded",
         "usage_not_included",
@@ -609,7 +614,7 @@ fn failure_policy_is_transport_parity_safe_before_and_after_commit() {
         Surface::WebsocketHandshake,
         Surface::WebsocketMessage,
     ];
-    let cases: [(&str, u16, &[u8], RuntimeHttpErrorClass, RuntimeHttpErrorAction); 5] = [
+    let cases: [(&str, u16, &[u8], RuntimeHttpErrorClass, RuntimeHttpErrorAction); 8] = [
         (
             "generic_429",
             429,
@@ -621,6 +626,27 @@ fn failure_policy_is_transport_parity_safe_before_and_after_commit() {
             "explicit_quota",
             429,
             br#"{"error":{"code":"insufficient_quota","message":"Quota exhausted"}}"#,
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+        ),
+        (
+            "api_key_spend_limit",
+            429,
+            br#"{"error":{"code":"api_key_spend_limit_exceeded","message":"API key spend limit exceeded"}}"#,
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+        ),
+        (
+            "project_spend_limit",
+            429,
+            br#"{"error":{"code":"project_spend_limit_exceeded","message":"Project spend limit exceeded"}}"#,
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+        ),
+        (
+            "organization_spend_limit",
+            429,
+            br#"{"error":{"code":"organization_spend_limit_exceeded","message":"Organization spend limit exceeded"}}"#,
             RuntimeHttpErrorClass::Quota,
             RuntimeHttpErrorAction::RotateProfile,
         ),

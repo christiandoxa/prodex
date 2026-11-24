@@ -91,3 +91,56 @@ fn keepalive_websocket_holds_until_a_retryable_capacity_frame_or_real_output() {
     assert!(!completed.precommit_hold);
     assert!(completed.terminal_event);
 }
+
+#[test]
+fn native_spend_limits_remain_precommit_only_in_sse_and_websocket() {
+    for code in [
+        "api_key_spend_limit_exceeded",
+        "project_spend_limit_exceeded",
+        "organization_spend_limit_exceeded",
+    ] {
+        for failure in [
+            serde_json::json!({"type":"error", "error":{"code":code}}),
+            serde_json::json!({"type":"response.failed", "response":{"error":{"code":code}}}),
+        ] {
+            let failure = failure.to_string();
+            let wire = format!("{PRELUDE}data: {failure}\r\n\r\n");
+            assert_eq!(
+                inspect_runtime_sse_buffer(wire.as_bytes()),
+                RuntimeSseInspectionProgress::QuotaBlocked,
+                "{code}: {failure}",
+            );
+            assert_eq!(
+                inspect_runtime_websocket_text_frame_with_phase(
+                    &failure,
+                    RuntimeHttpErrorPhase::PreCommit,
+                )
+                .retry_kind,
+                Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked),
+                "{code}: {failure}",
+            );
+            assert_eq!(
+                inspect_runtime_websocket_text_frame_with_phase(
+                    &failure,
+                    RuntimeHttpErrorPhase::Committed,
+                )
+                .retry_kind,
+                None,
+                "{code}: {failure}",
+            );
+            for output in [
+                r#"{"type":"response.output_text.delta","delta":"already visible"}"#,
+                r#"{"type":"response.function_call_arguments.delta","delta":"{"}"#,
+            ] {
+                let wire = format!("{PRELUDE}data: {output}\r\n\r\ndata: {failure}\r\n\r\n");
+                assert!(
+                    matches!(
+                        inspect_runtime_sse_buffer(wire.as_bytes()),
+                        RuntimeSseInspectionProgress::Commit { .. }
+                    ),
+                    "{code}: {failure}",
+                );
+            }
+        }
+    }
+}

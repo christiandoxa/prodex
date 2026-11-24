@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.171.0 release",
+      "baseline_source": "openai/codex rust-v0.172.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -79,7 +79,22 @@
             "provider.normalize_completed_output_item(&mut item);",
             "fn prepare_response_items_for_request(&self, input: &mut [ResponseItem])",
             ".is_some_and(|id| id.allocation().is_none() && !id.is_prefixed())",
-            "item.set_id(/*new_id*/ None);"
+            "item.set_id(/*new_id*/ None);",
+            "fn sampling_result_destination(",
+            "if !include_internal\n        || !responses_headers.is_empty()",
+            ".is_some_and(|params| !params.is_empty())",
+            ".filter(|owner| owner.is_current())?",
+            "Some(CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_))",
+            "is_local_connector_result_gateway(&setup.api_provider.base_url)",
+            "codex_model_provider_info::CHATGPT_CODEX_BASE_URL",
+            "ExecutedToolCalls::is_result_body_provider_header(name.as_str())",
+            "fn sampling_result_bodies(",
+            "matches!(metadata.request_kind, Some(CodexResponsesRequestKind::Turn))",
+            "return turn.for_input(input, &destination.owner);",
+            "options.tool_results = self.client.sampling_result_bodies(",
+            "let result_body_destination = if warmup {\n                None",
+            "payload.tool_results = self.client.sampling_result_bodies(",
+            "payload.input,"
           ]
         },
         {
@@ -411,34 +426,40 @@
             "response_id,",
             "token_usage,",
             "pub(crate) fn metadata_events(",
-            "safety_buffering.map(ResponseEvent::SafetyBuffering)"
+            "safety_buffering.map(ResponseEvent::SafetyBuffering)",
+            "if let Some(error) = parse_error_event(event.error.as_ref(), event.headers.as_ref())",
+            "return Err(ResponsesEventError::Api(error));",
+            "Err(error) => {\n                let _ = tx_event.send(Err(error.into_api_error())).await;\n                return;",
+            "let error = ApiError::Stream(\"stream closed before response.completed\".into());"
           ]
         },
         {
           "path": "codex-rs/codex-api/src/sse/responses_error.rs",
-          "reason": "Owns Codex 0.159 response.failed classification after extraction from responses.rs, including explicit quota, rate-limit, overload, invalid-prompt, policy, and retry-delay semantics.",
+          "reason": "Classifies failed Responses and recognized statusless retry errors, preserving validated Retry-After metadata and distinct rate-limit/overload behavior.",
           "required_contains": [
             "parse_failed_response",
-            "insufficient_quota",
-            "credit_balance_exhausted",
-            "organization_spend_limit_exceeded",
-            "project_spend_limit_exceeded",
             "rate_limit_exceeded",
             "slow_down",
             "server_is_overloaded",
-            "invalid_prompt",
-            "ApiError::QuotaExceeded",
             "ApiError::RateLimitExceeded",
             "ApiError::ServerOverloaded",
-            "ApiError::InvalidPrompt",
             "json_headers_to_http_headers",
-            "let retry_after_header = error",
             ".and_then(|error| error.get(\"headers\"))",
             "RetryAfter::from_headers(&json_headers_to_http_headers(headers))",
             "Duration::try_from_secs_f64(value).ok()",
             "retry_after_header\n                .or_else",
             "policy_capacity_unavailable",
-            "ApiError::PolicyCapacityUnavailable"
+            "ApiError::PolicyCapacityUnavailable",
+            "fn retry_after_header(headers: Option<&Value>)",
+            "let retry_after_header = retry_after_header(error.and_then(|error| error.get(\"headers\")));",
+            "pub(super) fn parse_error_event(",
+            "parse_terminal_provider_error(error, /*status*/ None)",
+            "\"policy_capacity_unavailable\" | \"server_is_overloaded\"",
+            "retry_after_header(error.get(\"headers\")).or_else(|| retry_after_header(headers))",
+            "ApiError::PolicyCapacityUnavailable { retry_after }",
+            "ApiError::ServerOverloaded { retry_after }",
+            "_ => None,",
+            "Some(\"rate_limit_exceeded\" | \"slow_down\")"
           ]
         },
         {
@@ -496,12 +517,16 @@
             "large_turn_is_one_text_message_in_bounded_frames",
             ".get(X_CODEX_WEBSOCKET_MAX_MESSAGE_BYTES_HEADER)",
             ".and_then(|value| value.parse::<usize>().ok());",
-            ".is_some_and(|limit| request_text.len() > limit)",
+            ".is_some_and(|limit| request_text.text.len() > limit)",
             "let mut received_text = false;",
             "received_text = true;",
             "Message::Close(Some(frame)) if frame.code == CloseCode::Size && !received_text",
             "return Err(ApiError::WebsocketMessageTooLarge);",
-            "x-codex-websocket-max-message-bytes"
+            "x-codex-websocket-max-message-bytes",
+            "struct WsRequestText {\n    text: Utf8Bytes,\n    private: bool,",
+            "on_encoded(request_text.as_ref());\n        let enriched = with_tool_results(request_text.as_str(), &ws_request.tool_results);",
+            "private: enriched.is_some(),",
+            "if request.private {\n                                    send.with_subscriber(tracing::Dispatch::none()).await"
           ]
         },
         {
@@ -537,7 +562,15 @@
             "if features.enabled(Feature::MemoryTool)\n            && memories.version.is_none()",
             "&& memories.dual_write != Some(false)",
             "tokio::fs::try_exists(codex_home.join(MemoryVersion::V1.directory_name())).await",
-            "memories.version = Some(MemoryVersion::V2)"
+            "memories.version = Some(MemoryVersion::V2)",
+            "let restore_persisted_profile = sandbox_mode.is_none()",
+            "&& default_permissions_override.is_none()",
+            "&& persisted_permission_profile_id.is_none();",
+            "The saved read-only permission profile is disallowed by requirements. Select a permission profile explicitly to continue.",
+            "permission_profile.intersect_with_read_only().ok_or_else",
+            "saved_file_system.preserve_deny_read_restrictions_from(&file_system_sandbox_policy);",
+            "Could not load saved permission profile `{profile_id}`: {err}. Select a permission profile explicitly to continue.",
+            "default_permissions_override.or(persisted_profile_id.map(|(profile_id, _)| profile_id))"
           ]
         },
         {
@@ -562,7 +595,11 @@
             "id: Feature::IncrementalTools,\n        key: \"incremental_tools\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::IncrementalToolsLegacy,\n        key: \"incremental_tools_legacy\",\n        stage: Stage::Stable,\n        default_enabled: true,",
             "id: Feature::IncrementalToolsLegacyGcp,\n        key: \"incremental_tools_legacy_gcp\",\n        stage: Stage::Stable,\n        default_enabled: true,",
-            "id: Feature::MultiEnvironmentMcp,\n        key: \"multi_environment_mcp\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+            "id: Feature::MultiEnvironmentMcp,\n        key: \"multi_environment_mcp\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,",
+            "id: Feature::McpLazyStdioStartup,\n        key: \"mcp_lazy_stdio_startup\",\n        stage: Stage::Stable,\n        default_enabled: true,",
+            "id: Feature::CodeModeHostGrpc,\n        key: \"code_mode_host_grpc\",\n        stage: Stage::Removed,\n        default_enabled: false,",
+            "`[features].code_mode_host_grpc` is deprecated and ignored.",
+            "self.record_legacy_usage_force(\n                        \"features.code_mode_host_grpc\","
           ]
         },
         {
@@ -739,7 +776,19 @@
             "Some(TrustLevel::Untrusted) => anyhow::bail!",
             "set_project_trust_level(project.trust_key, TrustLevel::Trusted)",
             "default_cwd: Some(config.cwd.clone())",
-            "warning: Untrusted project-local configuration is disabled"
+            "warning: Untrusted project-local configuration is disabled",
+            "let mut explicit_permissions = overrides.sandbox_mode.is_some();",
+            "ConfigLayerSource::SessionFlags",
+            "profile: Some(_),",
+            "cwd: (overrides.cwd.is_some() || runtime_workspace_roots.is_some())",
+            "sandbox: sandbox.filter(|_| explicit_permissions)",
+            "permissions: permissions.filter(|_| explicit_permissions)",
+            "first_turn_cwd = None;",
+            "resumed_workspace_roots = Some(permissions.workspace_roots);",
+            "if !overrides.additional_writable_roots.is_empty()",
+            "first_turn_workspace_roots = Some(roots);",
+            "cwd: first_turn_cwd,",
+            "runtime_workspace_roots: first_turn_workspace_roots,"
           ]
         },
         {
@@ -837,7 +886,13 @@
             "#[experimental(\"thread/fork.attachToSource\")]",
             "pub attach_to_source: bool",
             "#[experimental(\"thread/list.attachedToThreadId\")]",
-            "pub attached_to_thread_id: Option<String>"
+            "pub attached_to_thread_id: Option<String>",
+            "pub cwd: LegacyAppPathString,",
+            "pub runtime_workspace_roots: Option<Vec<LegacyAppPathString>>,",
+            "pub runtime_workspace_roots: Vec<LegacyAppPathString>,",
+            "#[schemars(with = \"codex_utils_absolute_path::AbsolutePathBuf\")]",
+            "#[schemars(with = \"Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>\")]",
+            "#[schemars(with = \"Vec<codex_utils_absolute_path::AbsolutePathBuf>\")]"
           ]
         },
         {
@@ -1056,7 +1111,7 @@
         },
         {
           "path": "codex-rs/core/src/session/environment.rs",
-          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner’s first configuration or failure without overwriting a child configuration that already won.",
+          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner\u2019s first configuration or failure without overwriting a child configuration that already won.",
           "required_contains": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -1360,7 +1415,11 @@
             "EventMsg::ThreadSettingsApplied(event)",
             "thread_id == history.conversation_id",
             "Some(_) => crossed_foreign_snapshot = true",
-            "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)"
+            "None if !crossed_foreign_snapshot => return Some(&event.thread_settings)",
+            "fn unattributed_read_only_profile(",
+            "let read_only = PermissionProfile::read_only();",
+            "(active_profile.is_none() && *profile == read_only).then_some(read_only)",
+            "unnamed_permission_profile: if event.thread_id.is_none()"
           ]
         },
         {
@@ -1402,13 +1461,29 @@
         },
         {
           "path": "codex-rs/codex-api/src/error.rs",
-          "reason": "Typed model-not-found is terminal and preserves its message and HTTP status.",
+          "reason": "Native terminal provider classification owns balance errors, scoped API spend limits, invalid prompts, model errors and runtime/policy denials across transports.",
           "required_contains": [
             "pub(crate) fn parse_terminal_provider_error(",
             "\"model_not_found\"",
             "None | Some(StatusCode::BAD_REQUEST | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND)",
             "Some(ApiError::ModelNotFound {",
-            "unwrap_or(code)"
+            "unwrap_or(code)",
+            "insufficient_quota",
+            "credit_balance_exhausted",
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
+            "invalid_prompt",
+            "ApiError::QuotaExceeded",
+            "ApiError::InvalidPrompt",
+            "parse_terminal_provider_error",
+            "(\"insufficient_quota\" | \"credit_balance_exhausted\", None)",
+            "Some(ApiError::QuotaExceeded)",
+            "(\"api_key_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+            "Some(ApiError::SpendLimitExceeded(SpendLimitScope::ApiKey))",
+            "(\"project_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+            "Some(ApiError::SpendLimitExceeded(SpendLimitScope::Project))",
+            "(\"organization_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+            "Some(ApiError::SpendLimitExceeded(SpendLimitScope::Organization))"
           ]
         },
         {
@@ -1430,7 +1505,14 @@
             "| CodexErrorDetails::ContentPolicyViolation { .. }",
             "pub fn requires_http_fallback(&self) -> bool",
             "matches!(self.retry_policy(), RetryPolicy::FallBackToHttp)",
-            "CodexErrorDetails::WebsocketMessageTooLarge => RetryPolicy::FallBackToHttp,"
+            "CodexErrorDetails::WebsocketMessageTooLarge => RetryPolicy::FallBackToHttp,",
+            "pub enum SpendLimitScope {\n    ApiKey,\n    Project,\n    Organization,",
+            "APISpendLimitExceeded(SpendLimitScope)",
+            "| CodexErrorDetails::APISpendLimitExceeded(_)",
+            "CodexErrorDetails::APISpendLimitExceeded(SpendLimitScope::ApiKey)",
+            "CodexErrorInfo::ApiKeySpendLimitExceeded",
+            "CodexErrorInfo::ProjectSpendLimitExceeded",
+            "CodexErrorInfo::OrganizationSpendLimitExceeded"
           ]
         },
         {
@@ -1734,6 +1816,51 @@
             "#[serde(tag = \"mode\", rename_all = \"camelCase\")]",
             "pub enum AgentMessageDisplay",
             "moderated: stored.moderated || display.is_none(),"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/permissions.rs",
+          "reason": "Remote writable-root strings and permission display use path URIs; conversion for enforcement validates absolute paths on the server host.",
+          "required_contains": [
+            "writable_roots: Vec<LegacyAppPathString>,",
+            "pub fn permission_profile_template(",
+            "pub fn permission_profile_for_cwd(",
+            "PermissionProfile::workspace_write_with_path_uris(",
+            "pub fn try_to_core(&self) -> io::Result<codex_protocol::protocol::SandboxPolicy>",
+            "if !path.is_absolute()",
+            "writable root is not absolute: {}",
+            "AbsolutePathBuf::from_absolute_path_checked(path)"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/thread_manager.rs",
+          "reason": "Native thread creation selects the process-owned gRPC Code Mode provider while retaining output-truncation configuration.",
+          "required_contains": [
+            "let provider = Arc::new(ProcessOwnedGrpcCodeModeSessionProvider::with_host_program(",
+            "Feature::CodeModeHostOutputTruncation",
+            "Arc::new(LocalServerOutputProvider { inner: provider })"
+          ]
+        },
+        {
+          "path": "codex-rs/config/src/types.rs",
+          "reason": "Per-tool app approval reviewers are optional and raw tool names take precedence over display-title lookup.",
+          "required_contains": [
+            "pub struct AppToolConfig {",
+            "pub approvals_reviewer: Option<ApprovalsReviewer>,",
+            "pub fn for_tool(&self, name: &str, title: Option<&str>)",
+            "self.tools\n            .get(name)\n            .or_else(|| title.and_then(|title| self.tools.get(title)))"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/connectors.rs",
+          "reason": "Managed auto-review requirements remain authoritative; otherwise a verified app tool reviewer precedes link, app and default reviewer settings.",
+          "required_contains": [
+            "if model.is_some_and(|model| requirements.auto_review_required_for_model(model))",
+            "return ApprovalsReviewer::AutoReview;",
+            "tool.and_then(|(name, title)| app?.tools.as_ref()?.for_tool(name, title))",
+            ".and_then(|tool| tool.approvals_reviewer)",
+            ".and_then(|link| link.approvals_reviewer)",
+            ".or_else(|| app.and_then(|app| app.approvals_reviewer))"
           ]
         }
       ],
@@ -2201,16 +2328,18 @@
         {
           "id": "sse.quota-codes",
           "kind": "co_occurrence",
-          "file": "codex-rs/codex-api/src/sse/responses_error.rs",
-          "reason": "Codex 0.159 moves failed Responses classification into responses_error.rs while retaining explicit balance/spend-limit quota codes, slow_down/rate_limit_exceeded, and server overload as distinct classes.",
+          "file": "codex-rs/codex-api/src/error.rs",
+          "reason": "Codex 0.172 centralizes balance and scoped spend-limit classification in the terminal provider error owner; spend limits apply only to statusless events or HTTP 429.",
           "file_contains_all": [
-            "insufficient_quota",
-            "credit_balance_exhausted",
-            "organization_spend_limit_exceeded",
-            "project_spend_limit_exceeded",
-            "rate_limit_exceeded",
-            "slow_down",
-            "server_is_overloaded"
+            "parse_terminal_provider_error",
+            "(\"insufficient_quota\" | \"credit_balance_exhausted\", None)",
+            "Some(ApiError::QuotaExceeded)",
+            "(\"api_key_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+            "Some(ApiError::SpendLimitExceeded(SpendLimitScope::ApiKey))",
+            "(\"project_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+            "Some(ApiError::SpendLimitExceeded(SpendLimitScope::Project))",
+            "(\"organization_spend_limit_exceeded\", None | Some(StatusCode::TOO_MANY_REQUESTS))",
+            "Some(ApiError::SpendLimitExceeded(SpendLimitScope::Organization))"
           ]
         },
         {
@@ -2812,7 +2941,7 @@
           "id": "core.subagent-pending-environment-inheritance",
           "kind": "environment_inheritance",
           "file": "codex-rs/core/src/session/environment.rs",
-          "reason": "Pending subagent environments must inherit the owner’s first ready/failure result without overwriting a child winner.",
+          "reason": "Pending subagent environments must inherit the owner\u2019s first ready/failure result without overwriting a child winner.",
           "file_contains_all": [
             "follow_inherited_environment_configurations",
             "starting.owner_configuration()",
@@ -2952,11 +3081,11 @@
           "id": "responses.failed-retry-after",
           "kind": "retry_metadata",
           "file": "codex-rs/codex-api/src/sse/responses_error.rs",
-          "reason": "Failed Responses events must retain validated upstream Retry-After guidance for quota, rate-limit, overload, and generic retryable errors.",
+          "reason": "Failed Responses retain validated upstream Retry-After guidance through the shared header parser, with plaintext rate-limit advice used only as fallback.",
           "file_contains_all": [
             "parse_failed_response",
-            "let retry_after_header = error",
-            ".and_then(|error| error.get(\"headers\"))",
+            "fn retry_after_header(headers: Option<&Value>)",
+            "let retry_after_header = retry_after_header(error.and_then(|error| error.get(\"headers\")));",
             "RetryAfter::from_headers(&json_headers_to_http_headers(headers))",
             "retry_after_header\n                .or_else",
             "Duration::try_from_secs_f64(value).ok()"
@@ -3924,7 +4053,7 @@
           "file_contains_all": [
             ".get(X_CODEX_WEBSOCKET_MAX_MESSAGE_BYTES_HEADER)",
             ".and_then(|value| value.parse::<usize>().ok());",
-            ".is_some_and(|limit| request_text.len() > limit)",
+            ".is_some_and(|limit| request_text.text.len() > limit)",
             "let mut received_text = false;",
             "received_text = true;",
             "Message::Close(Some(frame)) if frame.code == CloseCode::Size && !received_text",
@@ -4103,9 +4232,231 @@
             "pub enum AgentMessageDisplay",
             "moderated: stored.moderated || display.is_none(),"
           ]
+        },
+        {
+          "id": "responses.statusless-retry-errors",
+          "kind": "retry_metadata",
+          "file": "codex-rs/codex-api/src/sse/responses_error.rs",
+          "reason": "Recognized statusless overload and policy-capacity errors preserve nested or outer Retry-After headers; unknown error notifications remain unclassified.",
+          "file_contains_all": [
+            "pub(super) fn parse_error_event(",
+            "parse_terminal_provider_error(error, /*status*/ None)",
+            "\"policy_capacity_unavailable\" | \"server_is_overloaded\"",
+            "retry_after_header(error.get(\"headers\")).or_else(|| retry_after_header(headers))",
+            "ApiError::PolicyCapacityUnavailable { retry_after }",
+            "ApiError::ServerOverloaded { retry_after }",
+            "_ => None,",
+            "Some(\"rate_limit_exceeded\" | \"slow_down\")"
+          ]
+        },
+        {
+          "id": "responses.immediate-stream-errors",
+          "kind": "stream_lifecycle",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "Recognized provider failures are delivered immediately even when the upstream SSE connection stays open, while unknown notifications retain native handling.",
+          "file_contains_all": [
+            "if let Some(error) = parse_error_event(event.error.as_ref(), event.headers.as_ref())",
+            "return Err(ResponsesEventError::Api(error));",
+            "Err(error) => {\n                let _ = tx_event.send(Err(error.into_api_error())).await;\n                return;",
+            "let error = ApiError::Stream(\"stream closed before response.completed\".into());"
+          ]
+        },
+        {
+          "id": "responses.scoped-spend-limits",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/protocol/src/error.rs",
+          "reason": "Native API key, project and organization spend limits remain distinct terminal error scopes and preserve their app-server error identities.",
+          "file_contains_all": [
+            "pub enum SpendLimitScope {\n    ApiKey,\n    Project,\n    Organization,",
+            "APISpendLimitExceeded(SpendLimitScope)",
+            "| CodexErrorDetails::APISpendLimitExceeded(_)",
+            "CodexErrorDetails::APISpendLimitExceeded(SpendLimitScope::ApiKey)",
+            "CodexErrorInfo::ApiKeySpendLimitExceeded",
+            "CodexErrorInfo::ProjectSpendLimitExceeded",
+            "CodexErrorInfo::OrganizationSpendLimitExceeded"
+          ]
+        },
+        {
+          "id": "exec.resume-saved-settings",
+          "kind": "thread_lifecycle",
+          "file": "codex-rs/exec/src/lib.rs",
+          "reason": "Exec resume lets saved permissions, cwd and workspace roots remain authoritative unless explicit flags or profile configuration replace them; add-dir extends the resumed roots.",
+          "file_contains_all": [
+            "let mut explicit_permissions = overrides.sandbox_mode.is_some();",
+            "ConfigLayerSource::SessionFlags",
+            "profile: Some(_),",
+            "cwd: (overrides.cwd.is_some() || runtime_workspace_roots.is_some())",
+            "sandbox: sandbox.filter(|_| explicit_permissions)",
+            "permissions: permissions.filter(|_| explicit_permissions)",
+            "first_turn_cwd = None;",
+            "resumed_workspace_roots = Some(permissions.workspace_roots);",
+            "if !overrides.additional_writable_roots.is_empty()",
+            "first_turn_workspace_roots = Some(roots);",
+            "cwd: first_turn_cwd,",
+            "runtime_workspace_roots: first_turn_workspace_roots,"
+          ]
+        },
+        {
+          "id": "resume.saved-profile-enforcement",
+          "kind": "permission_lifecycle",
+          "file": "codex-rs/core/src/config/mod.rs",
+          "reason": "Saved named profiles must resolve explicitly; canonical read-only recovery cannot widen managed reads or bypass requirements, current denials or external enforcement.",
+          "file_contains_all": [
+            "let restore_persisted_profile = sandbox_mode.is_none()",
+            "&& default_permissions_override.is_none()",
+            "&& persisted_permission_profile_id.is_none();",
+            "The saved read-only permission profile is disallowed by requirements. Select a permission profile explicitly to continue.",
+            "permission_profile.intersect_with_read_only().ok_or_else",
+            "saved_file_system.preserve_deny_read_restrictions_from(&file_system_sandbox_policy);",
+            "Could not load saved permission profile `{profile_id}`: {err}. Select a permission profile explicitly to continue.",
+            "default_permissions_override.or(persisted_profile_id.map(|(profile_id, _)| profile_id))"
+          ]
+        },
+        {
+          "id": "resume.unattributed-read-only",
+          "kind": "permission_lifecycle",
+          "file": "codex-rs/app-server/src/request_processors/persisted_resume_settings.rs",
+          "reason": "Only canonical built-in read-only permissions may be recovered from history without an identifiable owning thread; other raw grants remain excluded.",
+          "file_contains_all": [
+            "fn unattributed_read_only_profile(",
+            "let read_only = PermissionProfile::read_only();",
+            "(active_profile.is_none() && *profile == read_only).then_some(read_only)",
+            "unnamed_permission_profile: if event.thread_id.is_none()"
+          ]
+        },
+        {
+          "id": "app-server.remote-thread-paths",
+          "kind": "wire_contract",
+          "file": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "reason": "Thread cwd and runtime workspace roots preserve server-native path strings across operating systems while retaining the published AbsolutePathBuf schema.",
+          "file_contains_all": [
+            "pub cwd: LegacyAppPathString,",
+            "pub runtime_workspace_roots: Option<Vec<LegacyAppPathString>>,",
+            "pub runtime_workspace_roots: Vec<LegacyAppPathString>,",
+            "#[schemars(with = \"codex_utils_absolute_path::AbsolutePathBuf\")]",
+            "#[schemars(with = \"Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>\")]",
+            "#[schemars(with = \"Vec<codex_utils_absolute_path::AbsolutePathBuf>\")]"
+          ]
+        },
+        {
+          "id": "app-server.remote-writable-roots",
+          "kind": "permission_lifecycle",
+          "file": "codex-rs/app-server-protocol/src/protocol/v2/permissions.rs",
+          "reason": "Remote writable-root strings and permission display use path URIs; conversion for enforcement validates absolute paths on the server host.",
+          "file_contains_all": [
+            "writable_roots: Vec<LegacyAppPathString>,",
+            "pub fn permission_profile_template(",
+            "pub fn permission_profile_for_cwd(",
+            "PermissionProfile::workspace_write_with_path_uris(",
+            "pub fn try_to_core(&self) -> io::Result<codex_protocol::protocol::SandboxPolicy>",
+            "if !path.is_absolute()",
+            "writable root is not absolute: {}",
+            "AbsolutePathBuf::from_absolute_path_checked(path)"
+          ]
+        },
+        {
+          "id": "features.lazy-stdio-mcp-default",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "Optional stdio MCP servers with a warm cached catalog lazily start on first use by default under the native stable feature.",
+          "file_contains_all": [
+            "id: Feature::McpLazyStdioStartup,\n        key: \"mcp_lazy_stdio_startup\",\n        stage: Stage::Stable,\n        default_enabled: true,"
+          ]
+        },
+        {
+          "id": "features.code-mode-grpc-removed",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "The obsolete code_mode_host_grpc setting is ignored with a deprecation notice because native Code Mode always selects gRPC.",
+          "file_contains_all": [
+            "id: Feature::CodeModeHostGrpc,\n        key: \"code_mode_host_grpc\",\n        stage: Stage::Removed,\n        default_enabled: false,",
+            "`[features].code_mode_host_grpc` is deprecated and ignored.",
+            "self.record_legacy_usage_force(\n                        \"features.code_mode_host_grpc\","
+          ]
+        },
+        {
+          "id": "code-mode.grpc-host",
+          "kind": "runtime_lifecycle",
+          "file": "codex-rs/core/src/thread_manager.rs",
+          "reason": "Native thread creation selects the process-owned gRPC Code Mode provider while retaining output-truncation configuration.",
+          "file_contains_all": [
+            "let provider = Arc::new(ProcessOwnedGrpcCodeModeSessionProvider::with_host_program(",
+            "Feature::CodeModeHostOutputTruncation",
+            "Arc::new(LocalServerOutputProvider { inner: provider })"
+          ]
+        },
+        {
+          "id": "apps.tool-reviewer-config",
+          "kind": "configuration",
+          "file": "codex-rs/config/src/types.rs",
+          "reason": "Per-tool app approval reviewers are optional and raw tool names take precedence over display-title lookup.",
+          "file_contains_all": [
+            "pub struct AppToolConfig {",
+            "pub approvals_reviewer: Option<ApprovalsReviewer>,",
+            "pub fn for_tool(&self, name: &str, title: Option<&str>)",
+            "self.tools\n            .get(name)\n            .or_else(|| title.and_then(|title| self.tools.get(title)))"
+          ]
+        },
+        {
+          "id": "apps.tool-reviewer-precedence",
+          "kind": "permission_lifecycle",
+          "file": "codex-rs/core/src/connectors.rs",
+          "reason": "Managed auto-review requirements remain authoritative; otherwise a verified app tool reviewer precedes link, app and default reviewer settings.",
+          "file_contains_all": [
+            "if model.is_some_and(|model| requirements.auto_review_required_for_model(model))",
+            "return ApprovalsReviewer::AutoReview;",
+            "tool.and_then(|(name, title)| app?.tools.as_ref()?.for_tool(name, title))",
+            ".and_then(|tool| tool.approvals_reviewer)",
+            ".and_then(|link| link.approvals_reviewer)",
+            ".or_else(|| app.and_then(|app| app.approvals_reviewer))"
+          ]
+        },
+        {
+          "id": "responses.connector-result-destination",
+          "kind": "capability_gate",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Private connector bodies require ChatGPT authentication, a current auth owner, an exact supported gateway and no unexpected provider query or routing headers.",
+          "file_contains_all": [
+            "fn sampling_result_destination(",
+            "if !include_internal\n        || !responses_headers.is_empty()",
+            ".is_some_and(|params| !params.is_empty())",
+            ".filter(|owner| owner.is_current())?",
+            "Some(CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_))",
+            "is_local_connector_result_gateway(&setup.api_provider.base_url)",
+            "codex_model_provider_info::CHATGPT_CODEX_BASE_URL",
+            "ExecutedToolCalls::is_result_body_provider_header(name.as_str())"
+          ]
+        },
+        {
+          "id": "responses.connector-result-ownership",
+          "kind": "request_metadata",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Connector result bodies are selected from the current turn and physical input for the destination auth owner; WebSocket prewarm never carries private bodies.",
+          "file_contains_all": [
+            "fn sampling_result_bodies(",
+            "matches!(metadata.request_kind, Some(CodexResponsesRequestKind::Turn))",
+            "return turn.for_input(input, &destination.owner);",
+            "options.tool_results = self.client.sampling_result_bodies(",
+            "let result_body_destination = if warmup {\n                None",
+            "payload.tool_results = self.client.sampling_result_bodies(",
+            "payload.input,"
+          ]
+        },
+        {
+          "id": "websocket.private-connector-results",
+          "kind": "transport_metadata",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Responses WebSockets enrich only the wire body after observers see the ordinary request; private result bodies suppress frame tracing and count toward negotiated message limits.",
+          "file_contains_all": [
+            "struct WsRequestText {\n    text: Utf8Bytes,\n    private: bool,",
+            "on_encoded(request_text.as_ref());\n        let enriched = with_tool_results(request_text.as_str(), &ws_request.tool_results);",
+            "private: enriched.is_some(),",
+            "if request.private {\n                                    send.with_subscriber(tracing::Dispatch::none()).await",
+            ".is_some_and(|limit| request_text.text.len() > limit)"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.171.0",
+      "tested_codex_release": "rust-v0.172.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -4631,12 +4982,37 @@
             "codex": "b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0"
           },
           "summary": "Qualifies remote noninteractive app-server connections, provider defaults, compaction sampling and cancellation, environment-scoped MCP startup, and refreshed app-server error and item schemas. Native Codex owns workspace UI, model defaults, remote connection behavior, and permissions."
+        },
+        {
+          "from": "rust-v0.171.0",
+          "to": "rust-v0.172.0",
+          "source_commit": "3d86e43b075adeba2193ec5c22ac92f55afd82e6",
+          "tag_object": "fc3036dba44468096953f0e832f3fecd3adc0228",
+          "upstream_release_date": "2026-11-24T00:03:55Z",
+          "source_archive_sha256": "76a50a700243e69c426eff656d61d9a2393b3243e8e4db430a4b6d700320511c",
+          "native_linux_asset": "codex-x86_64-unknown-linux-musl.tar.gz",
+          "native_linux_package_sha256": "a2342a8f7f68f088be30620ccfe9cb84162c93a6b56177855961cda3ed6be392",
+          "native_linux_asset_sha256": {
+            "codex": "ad83b94c093f0cdd8176a6bc8005a461bdf23a759863e157d40f562b8a9d664d"
+          },
+          "summary": "Qualifies native saved exec resume permissions and workspace roots, cross-platform remote paths, immediate streamed errors and scoped spend limits, lazy cached stdio MCP, per-tool approval reviewer precedence, authorized connector result bodies over Responses WebSockets, and universal gRPC Code Mode hosts. Native Codex remains the owner of permission enforcement, model defaults, UI, MCP startup and connector destination authorization.",
+          "stable_lifecycle_schemas_checked": 13,
+          "stable_lifecycle_schemas_changed": [
+            "ThreadForkResponse.json",
+            "ThreadResumeResponse.json",
+            "ThreadStartResponse.json",
+            "ThreadStartedNotification.json",
+            "TurnCompletedNotification.json",
+            "TurnStartResponse.json",
+            "TurnStartedNotification.json"
+          ],
+          "required_app_server_methods_checked": 12
         }
       ],
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
-        "schema_hash_note": "All 13 selected stable lifecycle hashes were checked against the official Codex 0.171.0 binary. Seven response and notification schemas add a policy error and optional MCP registration environment. Required RPC methods are verified with --experimental.",
+        "schema_hash_note": "All 13 selected stable lifecycle schema SHA-256 values were regenerated with the checksum-verified official Codex 0.172.0 Linux binary. Seven response/notification schemas add API key, project and organization spend-limit error identities; all parameter and interrupt schemas are byte-identical to 0.171.0. Remote path representation changes preserve the public JSON schema. Required methods are verified against the generated experimental schema.",
         "required_methods": [
           "initialize",
           "initialized",
@@ -4653,35 +5029,27 @@
         ],
         "stable_v2_sha256": {
           "ThreadForkParams.json": "60540b97d453ddbc5e12bfaa007a3718f31847d18dec0da59a5e4b89be4717ad",
-          "ThreadForkResponse.json": "b36e2e1aedc6ddb70c6dcdf4414c7a1064b3ebc39c615f6e9c655f6570708803",
+          "ThreadForkResponse.json": "1fc8caab83ef26fd8fbb3881761ed21baa57f73f3c31c71073bf00cec072b30c",
           "ThreadResumeParams.json": "cb2daef3e452f9dcb6cdd7a7a389b866ac486614558a46f3ec5538f3fe3b3ea1",
-          "ThreadResumeResponse.json": "ddcaa674e46e2ad795e6d41a616a79149f23ece3c290e48fa84b9399fe25f71b",
+          "ThreadResumeResponse.json": "d819f4d6614914fb612508d18335bbf95443dde3867ee3bb1aee9f78a3f6a4ee",
           "ThreadStartParams.json": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428",
-          "ThreadStartResponse.json": "adafd968fc204c6a25395cba283b4acccb4f506c2ccf5c094864fbc0c38a63c7",
-          "ThreadStartedNotification.json": "b2a74ca74f5e19eea944009df542f81749360d2fd13351ee155bce70269eb845",
-          "TurnCompletedNotification.json": "f454bca363503aa6b56ca6ad673737dd8d86bee49d0c536b14d93c7df9f88005",
+          "ThreadStartResponse.json": "c5eadc366fe2a37f77a2a67f9d79d16035f8c661549eb296d4825fddccaddf49",
+          "ThreadStartedNotification.json": "fd2cdc17f0bce4cc3be52c1aacff63dafcf4ad4c7e900b2405e1b122794af1f7",
+          "TurnCompletedNotification.json": "2396e8b74110357fc1186f4d8299e0104ecc88cd9819f47dd3fd094ee5b25f2e",
           "TurnInterruptParams.json": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b",
           "TurnInterruptResponse.json": "531de6be06fe979b5963f249bab82498a175e614bf65ac12fb2e849dfe60bcf1",
           "TurnStartParams.json": "7306e8a95152f1071b0fb8bcc22da20a798ae34c1c57b6d26dfafc2c2b47ee9e",
-          "TurnStartResponse.json": "9604458949acd680b5c7c768d0e0f70eb3e026bff5496f5ad7afa02021ef305f",
-          "TurnStartedNotification.json": "9f3fe27abe1068ceafaeee017c565ae2943be36e57ab638a572a303495616f6b"
+          "TurnStartResponse.json": "cec5885c0697eadbd1efc25511feba8592a0e069250de2412a89369fbf35ed8b",
+          "TurnStartedNotification.json": "8880cfd9f1dee76f476d2b3d866392f5c4dcc38c2d10cebbad2a8113154e8106"
         }
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.171.0",
-      "name": "0.171.0",
-      "published_at": "2026-11-20T00:44:47Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.171.0",
-      "body_head": [
-        "## New Features",
-        "- Make GPT-6.2 Sol the default catalog selection and add GPT-6.2 Astra. (#62106)",
-        "- Enable the TUI workspace by default. (#61352)",
-        "- Support existing app servers in noninteractive exec. (#61707)",
-        "- Add MCP-backed status lines and local remote-control commands. (#61979, #61988, #62121)",
-        "## Bug Fixes",
-        "- Preserve thread input across resumes and permission profiles across working directory updates. (#61216, #61195)"
-      ]
+      "tag_name": "rust-v0.172.0",
+      "name": "0.172.0",
+      "published_at": "2026-11-24T00:03:55Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.172.0",
+      "body_head": "## New Features\n- Native thread links, slash-argument completion, task-group navigation and lazy cached stdio MCP startup.\n- Per-tool connected-app approval reviewers and Bedrock Runtime setup.\n\n## Bug Fixes\n- Restore saved exec resume permissions, cwd and workspace roots while honoring explicit overrides.\n- Preserve remote paths across operating systems and deliver streamed provider errors immediately with scoped API spend limits."
     }
   },
   "claude": {

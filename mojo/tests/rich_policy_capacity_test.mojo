@@ -17,3 +17,11 @@ def main() raises:
     assert classify(nested, 503) == 5
     assert classify(overwritten, 503) == 4
     assert classify(policy, 500) == 5
+
+    for code in [
+        String("api_key_spend_limit_exceeded"),
+        String("project_spend_limit_exceeded"),
+        String("organization_spend_limit_exceeded"),
+    ]:
+        var quota = '{"error":{"code":"' + code + '"}}'
+        assert classify(quota, 429) == 1

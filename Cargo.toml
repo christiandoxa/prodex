@@ -157,7 +157,7 @@ tokio-postgres-rustls = { version = "0.14.0", features = ["aws-lc-rs"] }
 toml = "1.2.1"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 uuid = { version = "1.29.3", features = ["serde", "v7"] }
-url = "2.5.8"
+url = "2.5.9"
 zeroize = "1.9.2"
 zstd = "0.14.4"
 
