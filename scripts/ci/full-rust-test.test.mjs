@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import {
   RUNTIME_CI_BROAD_SHARD_FILTERS,
@@ -469,4 +469,34 @@ test("large CI matrices use one cache writer and retain failure diagnostics", ()
   assert.match(stress, /fromJSON\(needs\.changes\.outputs\.runtime_stress_matrix\)/);
   assert.match(processGuard, /save-if: \$\{\{ matrix\.lane == 'static' \}\}/);
   assert.match(runtime, /status=0[\s\S]*?status=1[\s\S]*?exit "\$\{status\}"/);
+});
+
+
+test("compiler cache readiness precedes every installed cache consumer", () => {
+  const workflows = readdirSync(".github/workflows").filter((name) => name.endsWith(".yml"));
+  let installs = 0;
+  for (const name of workflows) {
+    const workflow = readFileSync(`.github/workflows/${name}`, "utf8");
+    if (!workflow.includes("uses: mozilla-actions/sccache-action@")) continue;
+    assert.ok(workflow.includes("SCCACHE_CONF: ${{ github.workspace }}/.github/sccache.toml"), `${name}: shared startup budget missing`);
+    assert.doesNotMatch(workflow, /SCCACHE_SKIP_CACHE_CHECK/);
+    const steps = workflow.split(/(?=^      - name: )/mu);
+    for (let index = 0; index < steps.length; index += 1) {
+      const install = steps[index];
+      if (!install.includes("uses: mozilla-actions/sccache-action@")) continue;
+      installs += 1;
+      const ready = steps[index + 1] ?? "";
+      assert.match(ready, /^      - name: Start sccache before compiler use/mu, `${name}: compiler cache must be ready immediately after setup`);
+      assert.match(ready, /^        run: sccache --start-server$/mu);
+      assert.match(ready, /^        timeout-minutes: 3$/mu);
+      assert.doesNotMatch(ready, /continue-on-error|\|\|\s*true|--show-stats/);
+      const condition = (step) => step.match(/^        if: (.+)$/mu)?.[1] ?? null;
+      assert.equal(condition(ready), condition(install), `${name}: readiness must use the cache installation condition`);
+    }
+  }
+  assert.ok(installs > 0, "the workflow inventory must include compiler-cache consumers");
+  const config = readFileSync(".github/sccache.toml", "utf8");
+  const timeout = Number(config.match(/^server_startup_timeout_ms = (\d+)$/mu)?.[1]);
+  assert.ok(timeout > 10_000 && timeout <= 120_000, "cold cache startup needs a finite budget above the 10-second default");
+  assert.doesNotMatch(config, /skip_cache_check|ignore.*error/iu);
 });

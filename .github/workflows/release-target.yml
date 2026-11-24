@@ -29,6 +29,7 @@ env:
   CARGO_NET_RETRY: "3"
   SCCACHE_CACHE_SIZE: 2G
   SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_CONF: ${{ github.workspace }}/.github/sccache.toml
   KIRO_CLI_VERSION: ${{ inputs.kiro_cli_version }}
   MOJO_VERSION: "1.2.0"
   UV_VERSION: "0.13.9"
@@ -322,6 +323,11 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: "v0.20.0"
+
+      - name: Start sccache before compiler use
+        if: ${{ matrix.use-cross == false && (matrix.target == 'x86_64-apple-darwin' || matrix.target == 'aarch64-apple-darwin') }}
+        timeout-minutes: 3
+        run: sccache --start-server
 
       - name: Cache pinned cross tool
         if: ${{ matrix.use-cross && github.ref == 'refs/heads/main' }}

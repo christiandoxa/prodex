@@ -19,6 +19,7 @@ env:
   PRODEX_MOJO_REQUIRED: "1"
   SCCACHE_CACHE_SIZE: 2G
   SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_CONF: ${{ github.workspace }}/.github/sccache.toml
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -370,6 +371,10 @@ jobs:
         with:
           version: "v0.20.0"
 
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -476,6 +481,10 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: "v0.20.0"
+
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -614,6 +623,10 @@ jobs:
         with:
           version: "v0.20.0"
 
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -709,6 +722,10 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: "v0.20.0"
+
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -834,6 +851,10 @@ jobs:
         with:
           version: "v0.20.0"
 
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -940,6 +961,10 @@ jobs:
         with:
           version: "v0.20.0"
 
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -993,6 +1018,10 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: "v0.20.0"
+
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -1114,6 +1143,11 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: "v0.20.0"
+
+      - name: Start sccache before compiler use
+        if: matrix.lane == 'static'
+        timeout-minutes: 3
+        run: sccache --start-server
 
       - name: Cache Rust dependencies
         if: matrix.lane == 'static'
@@ -1252,6 +1286,10 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: "v0.20.0"
+
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -1447,6 +1485,10 @@ jobs:
         with:
           version: "v0.20.0"
 
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -1616,6 +1658,10 @@ jobs:
         with:
           version: "v0.20.0"
 
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
+
       - name: Fingerprint host release dependency inputs
         id: rust-deps-cache-key
         run: python3 scripts/ci/release_cargo_deps_cache_key.py --lockfile Cargo.lock --output "$GITHUB_OUTPUT"
@@ -1673,6 +1719,10 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: "v0.20.0"
+
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -1895,6 +1945,10 @@ jobs:
         with:
           version: "v0.20.0"
 
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -2067,6 +2121,10 @@ jobs:
         with:
           version: "v0.20.0"
 
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -2170,6 +2228,10 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: "v0.20.0"
+
+      - name: Start sccache before compiler use
+        timeout-minutes: 3
+        run: sccache --start-server
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2

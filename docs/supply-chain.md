@@ -24,6 +24,11 @@ the pinned npm version because the Node distribution bundles its own npm
 release. The sccache Action selects **0.20.0** through its explicit version
 input; the Action commit and the installed tool are pinned independently.
 
+The shared compiler-cache configuration allows 120 seconds for cold remote
+backend initialization. Each cache installation is followed by an explicit
+server-start step, bounded to three minutes, before a compiler consumer runs.
+Cache capability checks remain enabled, and startup errors still fail the job.
+
 ## Immutable inputs
 
 Release packages contain only Prodex executables and metadata. They do not
