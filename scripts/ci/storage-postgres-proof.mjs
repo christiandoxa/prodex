@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 const modulePath = fileURLToPath(import.meta.url);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const postgresImage = "postgres:16-alpine";
-const redisImage = "redis:7-alpine";
+const postgresImage = "postgres:19.0-alpine@sha256:cac45fb483caee3668946088a1c0532db89d5285c28dbfeac889b4068296e06f";
+const redisImage = "redis:8.12.0-alpine@sha256:ff55e25203f915f2fe9cc1428e6da969fec257dd6e6feb71a34fd0cf3a86b289";
 export const MISSING_DEPENDENCY_MESSAGE =
   "ci:storage-postgres-proof requires either PRODEX_TEST_POSTGRES_URL or local docker + psql + openssl";
 
@@ -40,6 +40,7 @@ function run(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: repoRoot,
       env,
+      timeout: options.timeout,
       stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
     });
 
@@ -178,6 +179,91 @@ async function createTlsMaterial(tlsDir) {
   await fs.chmod(serverKey, 0o640);
 }
 
+async function verifyPostgresImageUpgrade() {
+  // Resolve the maintained Compose mount and image with fixture-only secret paths.
+  // No project service, named volume, or real database is started by this proof.
+  const { stdout } = await run("docker", [
+    "compose", "--env-file", "/dev/null", "--profile", "postgres",
+    "--profile", "redis", "config", "--format", "json",
+  ], {
+    capture: true,
+    env: {
+      PRODEX_GATEWAY_TOKEN_FILE: "/dev/null",
+      OPENAI_API_KEY_FILE: "/dev/null",
+      PRODEX_GATEWAY_POSTGRES_URL_FILE: "/dev/null",
+      PRODEX_GATEWAY_REDIS_URL_FILE: "/dev/null",
+      PRODEX_POSTGRES_PASSWORD_FILE: "/dev/null",
+    },
+  });
+  const service = JSON.parse(stdout).services.postgres;
+  const volume = service.volumes.find((entry) => entry.type === "volume" && entry.source === "prodex-postgres");
+  if (!volume || service.image !== postgresImage) {
+    throw new Error("PostgreSQL proof must use the maintained Compose image and persistent volume");
+  }
+  await ensureDockerImage(service.image);
+  const options = [
+    "run", "--rm", "--network", "none", "--read-only",
+    "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+    "--user", service.user,
+    "--tmpfs", `${volume.target}:rw,nosuid,nodev,uid=70,gid=70,mode=0700`,
+    "--tmpfs", "/run/postgresql:rw,nosuid,nodev,uid=70,gid=70,mode=0700",
+    "--tmpfs", "/tmp:rw,nosuid,nodev,mode=1777",
+    "--env", `POSTGRES_VOLUME_ROOT=${volume.target}`,
+    "--env", "POSTGRES_PASSWORD=prodex-disposable-image-proof",
+  ];
+  if (service.environment.PGDATA) options.push("--env", `PGDATA=${service.environment.PGDATA}`);
+  const name = `prodex-pg-image-${process.pid}-${Date.now()}`;
+  const legacyName = `${name}-legacy`;
+  const freshName = `${name}-fresh`;
+  try {
+    await run("docker", [
+      ...options, "--name", legacyName, "--entrypoint", "bash", service.image, "-ceu", String.raw`
+  printf '16\n' > "$POSTGRES_VOLUME_ROOT/PG_VERSION"
+  if docker-entrypoint.sh postgres > /tmp/legacy-startup.log 2>&1; then
+    cat /tmp/legacy-startup.log >&2
+    exit 1
+  fi
+  grep -F 'there appears to be PostgreSQL data in:' /tmp/legacy-startup.log
+  grep -F "$POSTGRES_VOLUME_ROOT" /tmp/legacy-startup.log
+  test "$(cat "$POSTGRES_VOLUME_ROOT/PG_VERSION")" = 16
+  test ! -s "$PGDATA/PG_VERSION"
+  printf 'Legacy volume refused before initialization\n'
+  `,
+    ], { capture: true, timeout: 90000 });
+    await run("docker", [
+      ...options, "--name", freshName, "--entrypoint", "bash", service.image, "-ceu", String.raw`
+  case "$PGDATA" in
+    "$POSTGRES_VOLUME_ROOT"/*) ;;
+    *) printf 'PGDATA is outside the persistent volume\n' >&2; exit 1 ;;
+  esac
+  docker-entrypoint.sh postgres -c listen_addresses='' > /tmp/fresh-startup.log 2>&1 &
+  server_pid=$!
+  trap 'kill -INT "$server_pid" 2>/dev/null || :; wait "$server_pid" || :' EXIT
+  ready=
+  for attempt in {1..60}; do
+    if grep -Fq 'PostgreSQL init process complete; ready for start up.' /tmp/fresh-startup.log && pg_isready -q; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
+    sleep 1
+  done
+  if [ -z "$ready" ]; then cat /tmp/fresh-startup.log >&2; exit 1; fi
+  test "$(cat "$PGDATA/PG_VERSION")" = "$PG_MAJOR"
+  test "$(psql -U postgres -d postgres -Atc 'select 1')" = 1
+  printf 'Fresh volume initializes inside the persistent mount\n'
+  `,
+    ], { capture: true, timeout: 90000 });
+  } finally {
+    for (const container of [legacyName, freshName]) {
+      try {
+        await run("docker", ["rm", "--force", "--volumes", container], { capture: true });
+      } catch {}
+    }
+  }
+  process.stdout.write("PostgreSQL image upgrade proof: legacy volume refused; fresh volume initialized safely\n");
+}
+
 async function runWithManagedPostgres() {
   selectProofMode({
     postgresUrl: null,
@@ -185,7 +271,7 @@ async function runWithManagedPostgres() {
     psqlAvailable: await commandExists("psql"),
     opensslAvailable: await commandExists("openssl", ["version"]),
   });
-  await ensureDockerImage(postgresImage);
+  await verifyPostgresImageUpgrade();
   await ensureDockerImage(redisImage);
 
   const tlsParent = path.join(repoRoot, "target", "ci");
@@ -346,6 +432,10 @@ async function runSelfTest() {
 export async function main() {
   if (process.argv.includes("--self-test")) {
     await runSelfTest();
+    return;
+  }
+  if (process.argv.includes("--image-upgrade-check")) {
+    await verifyPostgresImageUpgrade();
     return;
   }
   if (process.env.PRODEX_TEST_POSTGRES_URL) {

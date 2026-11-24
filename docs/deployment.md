@@ -5,6 +5,16 @@ dedicated `prodex-gateway` data-plane service.
 
 ## Docker Compose
 
+The container builder uses Rust 1.100.0, Python 3.15.2, uv 0.13.9, and Mojo
+1.2.0 on Debian 13 (trixie). The runtime uses the same Debian stable release
+with exact package versions; container bases are pinned by digest. The build
+includes the vendored Cargo patch and Mojo sources and requires compiled Mojo
+kernels. `CARGO_BUILD_JOBS` defaults to four and can be set with
+`docker compose build --build-arg CARGO_BUILD_JOBS=<jobs>`.
+
+For an existing deployment, complete the database upgrade procedure below
+before starting the updated PostgreSQL or Redis service.
+
 Copy the example environment file, create private secret files, then start the
 gateway. The environment file contains only file paths; Compose projects the
 secret contents into the container instead of exporting them as application or
@@ -61,13 +71,49 @@ The tracked policy disables PostgreSQL TLS only for the bundled local Compose
 database. Use the Kubernetes baseline or an external TLS-enabled database for
 production.
 
+## Upgrading Existing Database Volumes
+
+The bundled service images are PostgreSQL 19.0 and Redis 8.12.0. Replacing an
+image is not a PostgreSQL major-version migration. Before upgrading a running
+stack, stop gateway writers, take verified database backups, and rehearse the
+restore procedure in [Backup and Restore](backup-restore.md) with separate test
+volumes. Keep the previous image digests and original volumes until validation
+and the rollback window are complete. Do not run `docker compose down -v` as
+part of an upgrade.
+
+PostgreSQL 18 and later use a versioned data directory. This Compose file keeps
+the `prodex-postgres` volume name and mounts it at `/var/lib/postgresql`, with
+the image default `PGDATA=/var/lib/postgresql/19/docker`. A volume created by the
+previous PostgreSQL 16 configuration has `PG_VERSION` at its root. The pinned
+PostgreSQL 19 entrypoint detects that file, reports the unsupported image-only
+upgrade, and exits before `initdb`; it does not silently create a new database
+beside the old one. Leave `PGDATA` at the image default so this detection remains
+active.
+
+Use PostgreSQL's supported [major-version upgrade procedure](https://www.postgresql.org/docs/19/upgrading.html):
+restore a logical dump into a separate, empty PostgreSQL 19 volume, or use
+`pg_upgrade` with both server versions and a reviewed directory layout. Rehearse
+the selected method, validate database roles, extensions, schema, and application
+data, then point the deployment at the verified volume. Retain the original
+PostgreSQL 16 volume unchanged for rollback; never attach a PostgreSQL 19 data
+directory to the old server. Prodex's `migrate` command handles application
+schema changes after the server upgrade; it does not upgrade PostgreSQL's
+on-disk format.
+
+Redis continues to mount its existing named volume at `/data`. Preserve a
+verified RDB/AOF backup before the Redis 7 to 8 upgrade and validate restoration
+with the pinned Redis 8 image. Redis is rebuildable coordination state in this
+topology; PostgreSQL remains authoritative. If rollback is needed, restore the
+pre-upgrade Redis backup into a separate volume for the old image rather than
+assuming that older Redis can read persistence files rewritten by Redis 8.
+
 ## Persistent Paths
 
 The compose stack mounts four named volumes:
 
 - `/var/lib/prodex`: `PRODEX_HOME`, including file-backed gateway state when selected. The tracked Compose policy is mounted read-only at `/var/lib/prodex/policy.toml`; the default Postgres-backed deployment keeps admin keys, usage counters, and billing ledger rows in the configured database.
 - `/var/log/prodex`: runtime logs, including the latest-runtime pointer and per-run proxy logs.
-- `/var/lib/postgresql/data`: PostgreSQL state.
+- `/var/lib/postgresql`: PostgreSQL state in `19/docker`, inside the existing `prodex-postgres` named volume.
 - `/data`: Redis append-only state.
 
 The gateway exposes the admin OpenAPI document at:

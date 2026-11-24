@@ -44,8 +44,8 @@ services:
       start_period: 10s
 
   postgres:
-    # postgres:16-alpine; Dependabot updates the tag and digest together.
-    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    # postgres:19.0-alpine; Dependabot updates the tag and digest together.
+    image: postgres:19.0-alpine@sha256:cac45fb483caee3668946088a1c0532db89d5285c28dbfeac889b4068296e06f
     profiles: ["postgres"]
     restart: unless-stopped
     user: "70:70"
@@ -57,7 +57,9 @@ services:
       - source: prodex_postgres_password
         target: PRODEX_POSTGRES_PASSWORD
     volumes:
-      - prodex-postgres:/var/lib/postgresql/data
+      # Preserve the named volume: PostgreSQL 19 rejects legacy PG_VERSION
+      # files at its root before initializing the new 19/docker layout.
+      - prodex-postgres:/var/lib/postgresql
     cap_drop:
       - ALL
     security_opt:
@@ -70,8 +72,8 @@ services:
       start_period: 10s
 
   redis:
-    # redis:7-alpine; Dependabot updates the tag and digest together.
-    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    # redis:8.12.0-alpine; Dependabot updates the tag and digest together.
+    image: redis:8.12.0-alpine@sha256:ff55e25203f915f2fe9cc1428e6da969fec257dd6e6feb71a34fd0cf3a86b289
     profiles: ["redis"]
     restart: unless-stopped
     user: "999:1000"

@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 const modulePath = fileURLToPath(import.meta.url);
 const scriptDir = path.dirname(modulePath);
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const postgresImage = "postgres:16-alpine";
+const postgresImage = "postgres:19.0-alpine@sha256:cac45fb483caee3668946088a1c0532db89d5285c28dbfeac889b4068296e06f";
 const sourceDatabase = "prodex_drill_source";
 const restoreDatabase = "prodex_drill_restore";
 const backupArtifactMagic = Buffer.from("PRODEX-BACKUP-V1", "ascii");
