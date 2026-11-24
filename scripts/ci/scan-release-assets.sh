@@ -39,7 +39,8 @@ if [[ "$scan_status" == 1 \
     '0.171.2:10229478760ac554717473cf7771afb5f6c8fdbd83b66fb896a0e8cfd92bfc3f'|\
     '0.171.2:334d93fb3b399453221c61724c1112b8f6c069d5b57ea854505b1a0c0a120350'|\
     '0.171.3:65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73'|\
-    '0.172.0:97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c')
+    '0.172.0:97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c'|\
+    '0.172.1:088d2186a231aecbef5481a756c16d07b049691f47dd251dc7e5da4e41e10aa6')
       echo "Reviewed ClamAV false positive for Prodex ${version} Windows x64 SHA-256 ${checksum%% *}."
       exit 0
       ;;

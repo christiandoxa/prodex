@@ -127,6 +127,7 @@ test("the same pinned antivirus engine is proven during compilation, before fina
     "--network none", "target=/scan,readonly", 'version="${PRODEX_RELEASE_SCAN_VERSION:-}"',
     "Win.Trojan.Virut-225 FOUND", 'checksum="$(sha256sum',
     "0.172.0:97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c",
+    "0.172.1:088d2186a231aecbef5481a756c16d07b049691f47dd251dc7e5da4e41e10aa6",
     'case "${version}:${checksum%% *}" in', 'exit "$scan_status"',
   ]) {
     assert.ok(validateReleaseMalwareGate(workflow, scanner.replace(marker, "")).length > 0,
@@ -154,9 +155,9 @@ test("reviewed Windows archive reuse requires matching source and an immutable a
 test("reviewed Windows x64 executable is pinned to its source and checked before smoke tests", () => {
   const markers = [
     "- name: Build prodex",
-    "matrix.target != 'x86_64-pc-windows-msvc' || (inputs.version != '0.171.3' && inputs.version != '0.172.0')",
+    "matrix.target != 'x86_64-pc-windows-msvc' || (inputs.version != '0.171.3' && inputs.version != '0.172.0' && inputs.version != '0.172.1')",
     "- name: Verify source for reviewed Windows x64 executable",
-    "matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0')",
+    "matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0' || inputs.version == '0.172.1')",
     "reviewed_source=49a10b1041dcae8891e2f41c3958daa86c868479",
     "reviewed_run=44925191608",
     "reviewed_artifact=14715940083",
@@ -167,15 +168,35 @@ test("reviewed Windows x64 executable is pinned to its source and checked before
     '.conclusion == "success"',
     "/actions/artifacts/14885229893",
     "sha256:f8f82989dd123b59edc3246d941a45a06cba6b1bc873697ef9543e043f8b8442",
-    'git diff --exit-code "${reviewed_source}" HEAD',
+    "reviewed_source=6a26c2e2653037759420f3aa9ce879da4b4e9781",
+    "reviewed_run=45336605907",
+    "reviewed_artifact=14894079263",
+    "/actions/jobs/138250884531",
+    '.run_id == 45336605907 and .head_sha == "6a26c2e2653037759420f3aa9ce879da4b4e9781" and .status == "completed" and .conclusion == "success"',
+    "/actions/artifacts/14894079263",
+    '.workflow_run.id == 45336605907 and .workflow_run.head_sha == "6a26c2e2653037759420f3aa9ce879da4b4e9781" and .workflow_run.head_branch == "main" and .name == "x86_64-pc-windows-msvc" and .expired == false and .digest == "sha256:3d7b09552d35bdf64956e6557c817429788a4cbaaad5d11025cc1c7b147e7827"',
+    "--jq '.head_sha')\" = \"${reviewed_source}\"",
+    'git fetch --no-tags --depth=1 origin "${reviewed_source}"',
+    'git diff --exit-code "${reviewed_source}" HEAD -- .',
+    'echo "run_id=${reviewed_run}" >> "${GITHUB_OUTPUT}"',
+    'echo "artifact_id=${reviewed_artifact}" >> "${GITHUB_OUTPUT}"',
     "- name: Retrieve reviewed Windows x64 executable",
-    "matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0')",
+    "matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0' || inputs.version == '0.172.1')",
     "run-id: ${{ steps.reviewed_windows.outputs.run_id }}",
     "artifact-ids: ${{ steps.reviewed_windows.outputs.artifact_id }}",
     "digest-mismatch: error",
     "$sha -cne '65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73'",
     "$sha -cne '97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c'",
+    "$sha -cne '088d2186a231aecbef5481a756c16d07b049691f47dd251dc7e5da4e41e10aa6'",
+    "PRODEX_WINDOWS_X64_BUILD_SHA256=$sha",
+    "& $binary --version",
     "- name: Verify compiled-in Mojo release",
+    "- name: Native smoke test",
+    "- name: Prepare binary artifact",
+    "${PRODEX_WINDOWS_X64_BUILD_SHA256:?missing pre-smoke hash}",
+    "| sha256sum --check -",
+    'cp "$binary"',
+    "- name: Upload binary artifact",
   ];
   let previous = -1;
   for (const marker of markers) {
@@ -183,6 +204,24 @@ test("reviewed Windows x64 executable is pinned to its source and checked before
     assert.ok(position > previous, `missing or out of order: ${marker}`);
     previous = position;
   }
+  const sourceCheck = targetWorkflow.slice(
+    targetWorkflow.indexOf("- name: Verify source for reviewed Windows x64 executable"),
+    targetWorkflow.indexOf("- name: Retrieve reviewed Windows x64 executable"),
+  );
+  assert.match(sourceCheck, /set -euo pipefail/);
+  assert.doesNotMatch(sourceCheck, /continue-on-error|\|\|\s*(?:true|:)|set \+e/);
+  const exclusions = [...sourceCheck.matchAll(/':\(exclude\)([^']+)'/g)].map((match) => match[1]);
+  assert.deepEqual(exclusions.sort(), [
+    ".github/workflows/release-target.yml",
+    "docs/supply-chain.md",
+    "scripts/ci/release-parallelism.test.mjs",
+    "scripts/ci/scan-release-assets.sh",
+    "scripts/ci/supply-chain-guard.mjs",
+    "scripts/ci/scan-release-assets.test.mjs",
+    "docs/release-notes/0.172.0.md",
+    "docs/release-notes/0.172.1.md",
+    "CHANGELOG.md",
+  ].sort(), "reviewed reuse must not exclude production code, manifests, lockfiles or compiler pins");
 });
 
 test("one read-only artifact consumer generates mandatory SBOM before validating scanned assets", () => {

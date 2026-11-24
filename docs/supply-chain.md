@@ -211,6 +211,32 @@ is checked before and after smoke tests. Fresh official definitions, EICAR,
 full scanning, and rejection of additional findings or scanner errors remain
 required. [Original 0.172.0 build and finding](https://github.com/christiandoxa/prodex/actions/runs/45316006417)
 
+For `0.172.1`, the fresh build has the same sole finding at raw file offset
+`0xFA359`. Its exact reviewed Windows x64 SHA-256 is
+`088d2186a231aecbef5481a756c16d07b049691f47dd251dc7e5da4e41e10aa6`.
+Comparison with the reviewed `0.172.0` executable covers the same 842-byte
+span: all 233 non-INT3 instruction records and six INT3 padding bytes match
+after normalizing only validated address operands. The three function lengths,
+heap import identities, both bounded switch tables, and external-call alias
+relationships match. The `fancy-regex 0.19.2` package checksum and expression
+source also match the prior review. The current pinned ClamAV image and fresh
+official definitions reproduce exactly this finding. This explains the
+specific signature collision, not the safety of every byte or external callee.
+
+The reviewed bytes were compiled at source commit
+`6a26c2e2653037759420f3aa9ce879da4b4e9781`, in successful Windows build job
+`138250884531` of run `45336605907`. The workflow retrieves immutable artifact
+`14894079263`, requiring ZIP SHA-256
+`3d7b09552d35bdf64956e6557c817429788a4cbaaad5d11025cc1c7b147e7827`,
+and verifies production-input equivalence before reuse. It checks the full
+executable hash before and after smoke tests. Only the reviewed policy,
+documentation, policy tests, and generated changelog may differ from the
+original source; manifests, lockfiles, production code, and Mojo inputs must
+match. Fresh definitions, EICAR, full scanning, and every other rejection
+remain mandatory. The final workflow qualifies and attests those exact reused
+bytes; it does not claim that they were recompiled at the later policy commit.
+[Original 0.172.1 build and finding](https://github.com/christiandoxa/prodex/actions/runs/45336605907)
+
 Run the local policy checks with:
 
 ```bash

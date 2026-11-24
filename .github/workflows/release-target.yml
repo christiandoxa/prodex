@@ -392,7 +392,7 @@ jobs:
           qemu-aarch64 --version
 
       - name: Build prodex
-        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' || (inputs.version != '0.171.3' && inputs.version != '0.172.0') }}
+        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' || (inputs.version != '0.171.3' && inputs.version != '0.172.0' && inputs.version != '0.172.1') }}
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C link-arg=/Brepro"
         shell: bash
@@ -433,7 +433,7 @@ jobs:
           fi
 
       - name: Verify source for reviewed Windows x64 executable
-        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0') }}
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0' || inputs.version == '0.172.1') }}
         id: reviewed_windows
         shell: bash
         env:
@@ -457,6 +457,16 @@ jobs:
               gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/14885229893" \
                 --jq '.workflow_run.id == 45316006417 and .workflow_run.head_sha == "5a5a93376dc6e3553516be6d772a73c541c91b5e" and .name == "x86_64-pc-windows-msvc" and .expired == false and .digest == "sha256:f8f82989dd123b59edc3246d941a45a06cba6b1bc873697ef9543e043f8b8442"' | grep -Fx true
               ;;
+            0.172.1)
+              reviewed_source=6a26c2e2653037759420f3aa9ce879da4b4e9781
+              reviewed_run=45336605907
+              reviewed_artifact=14894079263
+              # The scan finding was reviewed against these exact source-built bytes.
+              gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/138250884531" \
+                --jq '.run_id == 45336605907 and .head_sha == "6a26c2e2653037759420f3aa9ce879da4b4e9781" and .status == "completed" and .conclusion == "success"' | grep -Fx true
+              gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/14894079263" \
+                --jq '.workflow_run.id == 45336605907 and .workflow_run.head_sha == "6a26c2e2653037759420f3aa9ce879da4b4e9781" and .workflow_run.head_branch == "main" and .name == "x86_64-pc-windows-msvc" and .expired == false and .digest == "sha256:3d7b09552d35bdf64956e6557c817429788a4cbaaad5d11025cc1c7b147e7827"' | grep -Fx true
+              ;;
             *) echo "Unreviewed Windows x64 source version" >&2; exit 1 ;;
           esac
           test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${reviewed_run}" --jq '.head_sha')" = "${reviewed_source}"
@@ -469,12 +479,13 @@ jobs:
             ':(exclude)scripts/ci/supply-chain-guard.mjs' \
             ':(exclude)scripts/ci/scan-release-assets.test.mjs' \
             ':(exclude)docs/release-notes/0.172.0.md' \
+            ':(exclude)docs/release-notes/0.172.1.md' \
             ':(exclude)CHANGELOG.md'
           echo "run_id=${reviewed_run}" >> "${GITHUB_OUTPUT}"
           echo "artifact_id=${reviewed_artifact}" >> "${GITHUB_OUTPUT}"
 
       - name: Retrieve reviewed Windows x64 executable
-        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0') }}
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0' || inputs.version == '0.172.1') }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           github-token: ${{ github.token }}
@@ -512,6 +523,9 @@ jobs:
             throw "Reviewed Windows x64 executable hash does not match: $sha"
           }
           if ($env:RELEASE_VERSION -ceq '0.172.0' -and $sha -cne '97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c') {
+            throw "Reviewed Windows x64 executable hash does not match: $sha"
+          }
+          if ($env:RELEASE_VERSION -ceq '0.172.1' -and $sha -cne '088d2186a231aecbef5481a756c16d07b049691f47dd251dc7e5da4e41e10aa6') {
             throw "Reviewed Windows x64 executable hash does not match: $sha"
           }
           "PRODEX_WINDOWS_X64_BUILD_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

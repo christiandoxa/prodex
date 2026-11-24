@@ -9,7 +9,8 @@ import test from "node:test";
 const scanner = fileURLToPath(new URL("./scan-release-assets.sh", import.meta.url));
 const imageDigest = "clamav/clamav@sha256:64e30c0bf976198024deb3dc6d5cfe2485fb969c0f73549ba0fdb364b9469614";
 const finding = "/scan/prodex-x86_64-pc-windows-msvc.exe: Win.Trojan.Virut-225 FOUND";
-const reviewed172 = "97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c";
+const reviewed1720 = "97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c";
+const reviewed1721 = "088d2186a231aecbef5481a756c16d07b049691f47dd251dc7e5da4e41e10aa6";
 
 function runPolicy(overrides = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "prodex-scan-policy-"));
@@ -56,13 +57,13 @@ printf '%s  %s\\n' "$PRODEX_SCAN_TEST_SHA256" "$1"
         ...process.env,
         PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
         CLAMAV_IMAGE: `docker.io/${imageDigest}`,
-        PRODEX_RELEASE_SCAN_VERSION: overrides.version ?? "0.172.0",
+        PRODEX_RELEASE_SCAN_VERSION: overrides.version ?? "0.172.1",
         PRODEX_SCAN_TEST_CALLS: calls,
         PRODEX_SCAN_TEST_DIGEST: overrides.digest ?? imageDigest,
         PRODEX_SCAN_TEST_FRESHCLAM_STATUS: String(overrides.freshclamStatus ?? 0),
         PRODEX_SCAN_TEST_SCAN_STATUS: String(overrides.status ?? 1),
         PRODEX_SCAN_TEST_OUTPUT: overrides.output ?? finding,
-        PRODEX_SCAN_TEST_SHA256: overrides.sha256 ?? reviewed172,
+        PRODEX_SCAN_TEST_SHA256: overrides.sha256 ?? reviewed1721,
       },
     });
     assert.ifError(result.error);
@@ -77,15 +78,21 @@ const cases = [
   { name: "first reviewed 0.171.2 build", version: "0.171.2", sha256: "10229478760ac554717473cf7771afb5f6c8fdbd83b66fb896a0e8cfd92bfc3f", expected: 0 },
   { name: "second reviewed 0.171.2 build", version: "0.171.2", sha256: "334d93fb3b399453221c61724c1112b8f6c069d5b57ea854505b1a0c0a120350", expected: 0 },
   { name: "reviewed 0.171.3 build", version: "0.171.3", sha256: "65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73", expected: 0 },
-  { name: "reviewed 0.172.0 build", expected: 0 },
-  { name: "different release version", version: "0.172.1", expected: 1 },
+  { name: "reviewed 0.172.0 build", version: "0.172.0", sha256: reviewed1720, expected: 0 },
+  { name: "reviewed 0.172.1 build", output: `${finding}\n`, expected: 0 },
+  { name: "future release version", version: "0.172.2", expected: 1 },
+  { name: "missing release version", version: "", expected: 1 },
+  { name: "new executable with the previous reviewed version", version: "0.172.0", expected: 1 },
   { name: "new executable with an older reviewed version", version: "0.171.3", expected: 1 },
   { name: "older reviewed executable with the new version", sha256: "65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73", expected: 1 },
+  { name: "previous reviewed executable with the new version", sha256: reviewed1720, expected: 1 },
   { name: "different executable bytes", sha256: "0".repeat(64), expected: 1 },
   { name: "additional finding", output: `${finding}\n/scan/install.sh: Another.Signature FOUND\n`, expected: 1 },
   { name: "duplicate finding", output: `${finding}\n${finding}\n`, expected: 1 },
   { name: "different executable path", output: finding.replace("x86_64", "aarch64"), expected: 1 },
+  { name: "different signature", output: finding.replace("Win.Trojan.Virut-225", "Another.Signature"), expected: 1 },
   { name: "scanner error", status: 2, expected: 2 },
+  { name: "scanner container error", status: 125, expected: 125 },
   { name: "stale definitions", status: 2, output: "LibClamAV Error: virus database is older than the permitted age\n", expected: 2 },
   { name: "scanner warning with finding", output: `${finding}\nWARNING: incomplete scan\n`, expected: 1 },
   { name: "engine health directory", scope: "scan-health", expected: 1 },
