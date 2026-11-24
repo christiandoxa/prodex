@@ -384,7 +384,7 @@ jobs:
           qemu-aarch64 --version
 
       - name: Build prodex
-        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' || inputs.version != '0.171.3' }}
+        if: ${{ matrix.target != 'x86_64-pc-windows-msvc' || (inputs.version != '0.171.3' && inputs.version != '0.172.0') }}
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C link-arg=/Brepro"
         shell: bash
@@ -425,29 +425,53 @@ jobs:
           fi
 
       - name: Verify source for reviewed Windows x64 executable
-        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3' }}
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0') }}
+        id: reviewed_windows
         shell: bash
         env:
+          RELEASE_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          reviewed_source=49a10b1041dcae8891e2f41c3958daa86c868479
-          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/44925191608" --jq '.head_sha')" = "${reviewed_source}"
+          case "${RELEASE_VERSION}" in
+            0.171.3)
+              reviewed_source=49a10b1041dcae8891e2f41c3958daa86c868479
+              reviewed_run=44925191608
+              reviewed_artifact=14715940083
+              ;;
+            0.172.0)
+              reviewed_source=5a5a93376dc6e3553516be6d772a73c541c91b5e
+              reviewed_run=45316006417
+              reviewed_artifact=14885229893
+              # Bind the reviewed bytes to the successful fresh build and immutable ZIP.
+              gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/138184836239" \
+                --jq '.run_id == 45316006417 and .head_sha == "5a5a93376dc6e3553516be6d772a73c541c91b5e" and .conclusion == "success"' | grep -Fx true
+              gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/14885229893" \
+                --jq '.workflow_run.id == 45316006417 and .workflow_run.head_sha == "5a5a93376dc6e3553516be6d772a73c541c91b5e" and .name == "x86_64-pc-windows-msvc" and .expired == false and .digest == "sha256:f8f82989dd123b59edc3246d941a45a06cba6b1bc873697ef9543e043f8b8442"' | grep -Fx true
+              ;;
+            *) echo "Unreviewed Windows x64 source version" >&2; exit 1 ;;
+          esac
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${reviewed_run}" --jq '.head_sha')" = "${reviewed_source}"
           git fetch --no-tags --depth=1 origin "${reviewed_source}"
           git diff --exit-code "${reviewed_source}" HEAD -- . \
             ':(exclude).github/workflows/release-target.yml' \
             ':(exclude)docs/supply-chain.md' \
             ':(exclude)scripts/ci/release-parallelism.test.mjs' \
             ':(exclude)scripts/ci/scan-release-assets.sh' \
-            ':(exclude)scripts/ci/supply-chain-guard.mjs'
+            ':(exclude)scripts/ci/supply-chain-guard.mjs' \
+            ':(exclude)scripts/ci/scan-release-assets.test.mjs' \
+            ':(exclude)docs/release-notes/0.172.0.md' \
+            ':(exclude)CHANGELOG.md'
+          echo "run_id=${reviewed_run}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_id=${reviewed_artifact}" >> "${GITHUB_OUTPUT}"
 
       - name: Retrieve reviewed Windows x64 executable
-        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && inputs.version == '0.171.3' }}
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' && (inputs.version == '0.171.3' || inputs.version == '0.172.0') }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           github-token: ${{ github.token }}
-          run-id: 44925191608
-          artifact-ids: '14715940083'
+          run-id: ${{ steps.reviewed_windows.outputs.run_id }}
+          artifact-ids: ${{ steps.reviewed_windows.outputs.artifact_id }}
           path: target/x86_64-pc-windows-msvc/release
           merge-multiple: true
           digest-mismatch: error
@@ -477,6 +501,9 @@ jobs:
           }
           $sha = (Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($env:RELEASE_VERSION -ceq '0.171.3' -and $sha -cne '65630e75517dde4bc94e35c042894885776eafc17e7b107ed369a27c099fdf73') {
+            throw "Reviewed Windows x64 executable hash does not match: $sha"
+          }
+          if ($env:RELEASE_VERSION -ceq '0.172.0' -and $sha -cne '97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c') {
             throw "Reviewed Windows x64 executable hash does not match: $sha"
           }
           "PRODEX_WINDOWS_X64_BUILD_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

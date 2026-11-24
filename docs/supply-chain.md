@@ -177,6 +177,28 @@ its immutable artifact by run and artifact ID. It checks the digest before
 runtime smoke tests and scans those bytes with the full release assets.
 [Original 0.171.3 build and scan](https://github.com/christiandoxa/prodex/actions/runs/44925191608)
 
+For `0.172.0`, the fresh locked-source build has the same sole finding at raw
+file offset `0xFA3E9`. Its exact reviewed Windows x64 SHA-256 is
+`97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c`.
+Comparison with the reviewed `0.171.3` executable covers 842 bytes across three
+functions and their alignment: all 233 non-INT3 instruction records and six
+INT3 padding bytes match after normalizing only validated address operands.
+The two `86 01` fragments are displacement bytes for `HeapFree` and
+`GetProcessHeap`, `66` is an alignment NOP prefix, and the final jump uses a
+bounded switch table. Both switch tables and import identities match.
+The structure corresponds to `fancy-regex 0.19.2` expression destruction; its
+locked package is unchanged. This explains the specific signature collision,
+not the safety of every byte or external callee in the executable.
+
+The workflow checks source commit `5a5a93376dc6e3553516be6d772a73c541c91b5e`,
+its successful Windows build, immutable artifact `14885229893` from run
+`45316006417`, and the artifact ZIP digest before reuse. Source differences are
+restricted to the reviewed release policy, documentation and policy tests;
+production code, manifests and lockfiles must match. The full executable hash
+is checked before and after smoke tests. Fresh official definitions, EICAR,
+full scanning, and rejection of additional findings or scanner errors remain
+required. [Original 0.172.0 build and finding](https://github.com/christiandoxa/prodex/actions/runs/45316006417)
+
 Run the local policy checks with:
 
 ```bash
