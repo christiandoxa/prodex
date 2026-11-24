@@ -13,7 +13,7 @@ const shell = step.split("        run: |\n")[1].replace(/^          /gmu, "");
 const pins = {
   kiro: "a8bce4c6b740deb61009e3ad10995ec3027a51e6345025f1a2e5048ffdbf4b84",
   copilot: "00efcc2e196f0793d097935d6230062fc66e8247dc01334d2ac3eae4e26a1c7f",
-  claude: "674f61f20ff306f3100cf9200e4c36c4b70278b5bef2884549819b942a89c863",
+  claude: "4c00839cf46beb2b38ec310105f2d538f7f9321fe46c636299b74bcab94626b1",
 };
 
 test("Kiro setup pins the qualified version without changing shell profiles", () => {
@@ -83,7 +83,7 @@ if(${JSON.stringify(scenario)}==='checksum-failure'&&id==='kiro')process.exit(19
 fs.writeFileSync(path.join(${JSON.stringify(dir)},'verified-'+id),'checked');
 `, {mode:0o700});
     writeFileSync(path.join(dir, "bin/install"), `#!/bin/sh
-[ "$1" = "-m" ] && [ "$2" = "0755" ] && [ "$3" = "$RUNNER_TEMP/claude-2.1.220" ] && [ "$4" = "$HOME/.local/bin/claude" ] || exit 97
+[ "$1" = "-m" ] && [ "$2" = "0755" ] && [ "$3" = "$RUNNER_TEMP/claude-2.1.331" ] && [ "$4" = "$HOME/.local/bin/claude" ] || exit 97
 exec '${process.execPath}' ${workerPath} claude
 `, {mode:0o700});
     const env = {...process.env, PATH:path.join(dir,"bin")+path.delimiter+process.env.PATH,
@@ -98,9 +98,9 @@ exec '${process.execPath}' ${workerPath} claude
     if (scenario !== "parallel") assert.ok(!existsSync(path.join(dir,"github-path")));
     else {
       const record = id => JSON.parse(readFileSync(path.join(dir,"started-"+id),"utf8"));
-      assert.deepEqual(record("gemini").args,["install","--global","--ignore-scripts","@google/gemini-cli@0.53.0"]);
+      assert.deepEqual(record("gemini").args,["install","--global","--ignore-scripts","@google/gemini-cli@0.71.1"]);
       assert.deepEqual(record("kiro").args,["--force","--channel","stable","--version","3.5.0","--no-modify-path"]);
-      assert.equal(record("copilot").version,"v1.0.77");
+      assert.equal(record("copilot").version,"v1.0.114");
       assert.deepEqual(record("claude").args,[]);
       assert.equal(readFileSync(path.join(dir,"github-path"),"utf8").trim(),path.join(dir,"home/.local/bin"));
     }

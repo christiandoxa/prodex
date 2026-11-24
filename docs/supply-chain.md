@@ -18,6 +18,12 @@ The standalone fuzz workspace uses `cargo-fuzz` 0.13.2 and
 it does not change the product MSRV. CI validates `fuzz/Cargo.lock` before
 building every fuzz target.
 
+CI also pins Node.js **26.13.1**, npm **12.2.3**, uv **0.13.9**,
+Python **3.15.2**, and Mojo **1.2.0**. Each Node setup explicitly installs
+the pinned npm version because the Node distribution bundles its own npm
+release. The sccache Action selects **0.20.0** through its explicit version
+input; the Action commit and the installed tool are pinned independently.
+
 ## Immutable inputs
 
 Release packages contain only Prodex executables and metadata. They do not
@@ -44,27 +50,27 @@ refs:
 | Input | Readable ref | Commit |
 | --- | --- | --- |
 | `actions/checkout` | `v7` | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
-| `actions/setup-node` | `v7` | `820762786026740c76f36085b0efc47a31fe5020` |
+| `actions/setup-node` | `v7` | `949feb2413d6458794dcd2491c4babbbce0c15c1` |
 | `actions/cache` | `v6` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` |
-| `actions/upload-artifact` | `v7` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` |
-| `actions/download-artifact` | `v8` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` |
+| `actions/upload-artifact` | `v7` | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
+| `actions/download-artifact` | `v8` | `9000827ccba6bdab643e8b6fd33ac0654aef8333` |
 | `actions/attest-build-provenance` | `v4` | `4d101475d8b20a2381f78447822ac1eab6504dd8` |
-| `dtolnay/rust-toolchain` | `stable` | `b725eda525362e7cf34af9a7243cac1e3f01a7ec` |
-| `astral-sh/setup-uv` | `v10.0.1` | `20cfd1bf945f4377ade1205e4dbc17946fc9a30d` |
-| `Swatinem/rust-cache` | `v2` | `6323deb102c322ba6fcbdcafc7e3dddab59af2b6` |
+| `dtolnay/rust-toolchain` | `stable` | `39008827e6b4319a349e9a42dfc90579dd25f1ca` |
+| `astral-sh/setup-uv` | `v10.4.0` | `1db35dd8eee11c5894872e0b383ae6c406cf738d` |
+| `Swatinem/rust-cache` | `v2` | `d1527c8f67ef9af357290475d4af4b0fab8f12e0` |
 | `mozilla-actions/sccache-action` | `v0.0.11` | `fc920bf0ec8de6ee65d409111f7ec508035751ba` |
-| `SonarSource/sonarqube-scan-action` | `v8.2.2` | `ba9859eae8dd6bd29e412f25ddbbef3d032000f4` |
+| `SonarSource/sonarqube-scan-action` | `v8.5.1` | `70bad232163b09d998ea0707ee80c0ec80798c16` |
 
 Docker Official Image manifest-list digests were resolved from the registry
 with `docker buildx imagetools inspect`. The pinned Rust, Debian, PostgreSQL,
 and Redis indexes include both Linux amd64 and arm64 manifests. Syft, Gitleaks,
 and KICS CI images are also tag-and-digest pinned. The Rust quality job uses
-SonarQube Community Build `26.7.0.124771-community` at manifest digest
-`sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3`.
-The KICS gate uses `v2.1.20` at manifest digest
-`sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602`.
+SonarQube Community Build `26.11.0.134175-community` at manifest digest
+`sha256:7b2296713a92b8ea0dd7a083a25faadc59376c9a1e6daf2744a89711c54ea1ba`.
+The KICS gate uses `v2.2.1` at manifest digest
+`sha256:49ccc54b6ae7f5d5fc95e96f8f95c18c57f3bba047ab611a03d80792bdff6757`.
 The release scan uses the official ClamAV image
-`docker.io/clamav/clamav:1.5.5@sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8`.
+`docker.io/clamav/clamav:1.5.5@sha256:64e30c0bf976198024deb3dc6d5cfe2485fb969c0f73549ba0fdb364b9469614`.
 Dependabot owns Dockerfile and Compose refreshes. The supply-chain guard keeps
 container inputs pinned, while standalone releases publish binaries,
 installers, the SBOM, and checksums only; they do not build or publish a
@@ -128,8 +134,9 @@ Every other query remains enabled. CI also reads the JSON report and requires
 `total_counter` to equal zero, so a TRACE finding cannot bypass the severity
 exit-code gate.
 
-The parallel `supply-chain` job runs `cargo audit`, all configured `cargo deny`
-checks, pinned `cargo-machete 0.9.2`, and source SBOM generation.
+The parallel `supply-chain` job runs pinned `cargo-audit 0.23.0`, all configured
+`cargo-deny 0.22.0` checks, `cargo-machete 0.10.1`, and source SBOM generation
+with Syft **1.57.2**.
 `deny.toml` allows only the licenses present in the reviewed lockfile, denies
 wildcard dependencies and OpenSSL/native-tls, and treats duplicate versions as
 errors. Every duplicate exception names one exact older version, its current
@@ -211,7 +218,7 @@ docker run --rm \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m \
   --volume "${PWD}:/path:ro" \
   --volume "${PWD}/target/kics:/results" \
-  docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602 \
+  docker.io/checkmarx/kics:v2.2.1@sha256:49ccc54b6ae7f5d5fc95e96f8f95c18c57f3bba047ab611a03d80792bdff6757 \
   scan -p /path -o /results --output-name prodex-kics --report-formats json,sarif \
   --disable-secrets --disable-full-descriptions \
   --exclude-queries e84eaf4d-2f45-47b2-abe8-e581b06deb66,8c978947-0ff6-485c-b0c2-0bfca6026466 \

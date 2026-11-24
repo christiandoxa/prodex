@@ -45,8 +45,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Classify CI impact
         id: impact
@@ -112,7 +115,7 @@ jobs:
     timeout-minutes: 60
     env:
       MOJO_VERSION: "1.2.0"
-      UV_VERSION: "0.13.6"
+      UV_VERSION: "0.13.9"
 
     steps:
       - name: Check out repository
@@ -128,7 +131,7 @@ jobs:
 
       - name: Install Rust toolchain
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
           targets: x86_64-unknown-linux-gnu
@@ -204,7 +207,7 @@ jobs:
     timeout-minutes: 60
     env:
       MOJO_VERSION: "1.2.0"
-      UV_VERSION: "0.13.6"
+      UV_VERSION: "0.13.9"
     strategy:
       fail-fast: false
       matrix:
@@ -230,7 +233,7 @@ jobs:
 
       - name: Install Rust target
         if: ${{ steps.mojo-archive-cache.outputs.cache-hit != 'true' }}
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
           targets: ${{ matrix.target }}
@@ -324,7 +327,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
           components: rustfmt
@@ -358,12 +361,14 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -375,8 +380,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Compile and bind the exact-run native test executable
         id: pack
@@ -408,15 +416,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Rust toolchain for existing runtime fixtures
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Download this run's native test executable
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -454,7 +465,7 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
@@ -463,6 +474,8 @@ jobs:
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -493,8 +506,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Lint markdown docs
         run: node scripts/docs/lint-markdown.mjs && node scripts/docs/runtime-policy.mjs --self-test && node scripts/docs/runtime-policy.mjs --check
@@ -517,7 +533,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          promtool_image="docker.io/prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2"
+          promtool_image="docker.io/prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06"
           rules_dir="${PWD}/target/promtool"
           mkdir -p "${rules_dir}"
           sed -n '/^spec:$/,$p' deploy/observability/prodex-alerts.yaml \
@@ -589,12 +605,14 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-pc-windows-msvc
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -683,12 +701,14 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-pc-windows-msvc
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -699,8 +719,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Compile and bind integration tests and their CLI
         id: pack
@@ -743,15 +766,18 @@ jobs:
 
       - name: Install Rust toolchain for existing runtime fixtures
         if: matrix.suite != 'installer'
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Download this run's integration bundle
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -799,12 +825,14 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-pc-windows-msvc
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -815,8 +843,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Compile and bind the exact-run native test executable
         id: pack
@@ -848,15 +879,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Rust toolchain for existing runtime fixtures
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Download this run's native test executable
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -897,12 +931,14 @@ jobs:
           path: .prodex-ci/mojo-runtime/aarch64-apple-darwin
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -913,8 +949,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Run full macOS Rust suite
         env:
@@ -946,12 +985,14 @@ jobs:
           path: .prodex-ci/mojo-runtime/aarch64-apple-darwin
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -963,8 +1004,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Run native macOS broker recovery tests
         env:
@@ -1053,18 +1097,23 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Install Rust toolchain
         if: matrix.lane == 'static'
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         if: matrix.lane == 'static'
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         if: matrix.lane == 'static'
@@ -1155,8 +1204,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Run offline upstream compat replay gate
         run: node scripts/compat/check-upstream-baseline.mjs && node scripts/compat/capture-replay-fixture-tests.mjs
@@ -1174,7 +1226,7 @@ jobs:
 
     services:
       sonarqube:
-        image: docker.io/library/sonarqube:26.10.0.133078-community@sha256:f95aaa9016dd4e92c7d70691167a6d96dbb5d8acffd61eba1cb4335d364a7840
+        image: docker.io/library/sonarqube:26.11.0.134175-community@sha256:7b2296713a92b8ea0dd7a083a25faadc59376c9a1e6daf2744a89711c54ea1ba
         env:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
         ports:
@@ -1191,13 +1243,15 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
           components: clippy
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -1241,7 +1295,7 @@ jobs:
           } >> "${GITHUB_ENV}"
 
       - name: Run SonarQube scan
-        uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0
+        uses: SonarSource/sonarqube-scan-action@70bad232163b09d998ea0707ee80c0ec80798c16 # v8.5.1
         with:
           args: >-
             -Dsonar.projectKey=prodex-ci
@@ -1324,7 +1378,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target/kics
-          kics_image="docker.io/checkmarx/kics:v2.2.0@sha256:ef29dbac14b046b1ef65f3280646112e927a61781c5f01bca1aeb723e0b96003"
+          kics_image="docker.io/checkmarx/kics:v2.2.1@sha256:49ccc54b6ae7f5d5fc95e96f8f95c18c57f3bba047ab611a03d80792bdff6757"
           docker pull "${kics_image}"
           docker run --rm \
             --user "$(id -u):$(id -g)" \
@@ -1377,16 +1431,21 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
 
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
+
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -1401,7 +1460,7 @@ jobs:
             ~/.cargo/bin/cargo-audit
             ~/.cargo/bin/cargo-deny
             ~/.cargo/bin/cargo-machete
-          key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.22.2-deny-0.20.2-machete-0.9.2
+          key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.23.0-deny-0.22.0-machete-0.10.1
 
       - name: Install cargo supply-chain tools in parallel
         shell: bash
@@ -1428,9 +1487,9 @@ jobs:
             "$@" >"${log_dir}/${label}.log" 2>&1 &
             pids+=("$!")
           }
-          run_install cargo-audit install_tool cargo-audit cargo-audit --locked --version 0.22.2
-          run_install cargo-deny install_tool cargo-deny cargo-deny --locked --version 0.20.2
-          run_install cargo-machete install_tool cargo-machete cargo-machete --locked --version 0.9.2
+          run_install cargo-audit install_tool cargo-audit cargo-audit --locked --version 0.23.0
+          run_install cargo-deny install_tool cargo-deny cargo-deny --locked --version 0.22.0
+          run_install cargo-machete install_tool cargo-machete cargo-machete --locked --version 0.10.1
 
           status=0
           for index in "${!pids[@]}"; do
@@ -1476,7 +1535,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          syft_image="anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a"
+          syft_image="anchore/syft:v1.57.2@sha256:e97e20b6e6d1699c60296b66ab337941724f9bd06ac279d893eda89601fc4b2a"
           for attempt in 1 2 3; do
             if docker pull "$syft_image"; then
               break
@@ -1511,6 +1570,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 26.13.1
+          package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
+
       - name: Verify release/version sync
         shell: bash
         run: |
@@ -1539,12 +1607,14 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Fingerprint host release dependency inputs
         id: rust-deps-cache-key
@@ -1563,8 +1633,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Build host release binary
         run: cargo build --release --locked --target x86_64-unknown-linux-gnu --bin prodex
@@ -1592,12 +1665,14 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -1605,8 +1680,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Prebuild auto-rotate integration tests
         run: cargo test --locked --test auto_rotate --no-run
@@ -1627,15 +1705,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Download this run's native test executable
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -1683,15 +1764,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Download this run's native test executable
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -1731,15 +1815,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Download this run's native test executable
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -1799,12 +1886,14 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -1814,8 +1903,11 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Build instrumented runtime load binary
         run: cargo build --locked --features allocation-bench-support --bin prodex
@@ -1845,15 +1937,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           package-manager-cache: false
+
+      - name: Install pinned npm
+        run: npm install --global --ignore-scripts --no-audit --no-fund npm@12.2.3
 
       - name: Download this run's native test executable
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -1962,13 +2057,15 @@ jobs:
           path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
           components: clippy
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -2065,12 +2162,14 @@ jobs:
           test -s "${PRODEX_MOJO_ARCHIVE}"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: 1.100.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: "v0.20.0"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2

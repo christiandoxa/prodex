@@ -110,7 +110,7 @@ suite coverage.
 | Exact Rust/MSRV | manifests, workflows, Docker builder, and components use 1.100.0 | `Cargo.toml`; `rust-toolchain.toml`; `Dockerfile` | pass |
 | Immutable container inputs | pinned base/service inputs plus a non-deployable Kubernetes template; deployment images and rendered manifests are governed separately | `Dockerfile`; `compose.yaml`; `deploy/kubernetes/prodex-gateway.yaml`; `.github/workflows/standalone-release.yml` | pass |
 | License and dependency policy | audit plus deny advisories/bans/licenses/sources | `deny.toml`; `.github/workflows/ci.yml` | pass |
-| Unused direct dependencies | pinned `cargo-machete 0.9.2 --with-metadata` | `.github/workflows/ci.yml` | pass |
+| Unused direct dependencies | pinned `cargo-machete 0.10.1 --with-metadata` | `.github/workflows/ci.yml` | pass |
 | Release integrity | SPDX SBOM, attestations, verified `SHA256SUMS`, EICAR engine proof, and ClamAV scan of every final asset before publish | `.github/workflows/standalone-release.yml`; `scripts/ci/supply-chain-guard.mjs` | pass |
 | Credential leak scan | digest-pinned Gitleaks and CLI/URL capability guard | `.github/workflows/ci.yml`; `scripts/ci/secret-boundary-guard.mjs` | pass |
 | Production secret projection | gateway, control-plane, and migration commands resolve projected `SecretRef` files | `compose.yaml`; `deploy/compose-gateway-policy.toml`; `deploy/kubernetes/prodex-gateway.yaml`; `src/bin/prodex-gateway.rs`; `src/bin/prodex-control-plane.rs`; `src/enterprise_serve.rs` | pass: dedicated data-plane and control-plane policies use typed projected secrets; the three-replica control plane projects separate maker/checker and mTLS identities without provider credentials |

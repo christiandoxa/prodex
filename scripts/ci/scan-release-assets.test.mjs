@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const scanner = fileURLToPath(new URL("./scan-release-assets.sh", import.meta.url));
-const imageDigest = "clamav/clamav@sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8";
+const imageDigest = "clamav/clamav@sha256:64e30c0bf976198024deb3dc6d5cfe2485fb969c0f73549ba0fdb364b9469614";
 const finding = "/scan/prodex-x86_64-pc-windows-msvc.exe: Win.Trojan.Virut-225 FOUND";
 const reviewed172 = "97a738a530dd51c0bd1ad2c1dfbaef8864a727f57a596ee850969b747a0f590c";
 

@@ -13,11 +13,11 @@ import { validateCodexPackageLock } from "./codex-purity-guard.mjs";
 const ACTION = /^\s*uses:\s*([^\s#]+)(?:\s+#\s*(\S+))?\s*$/gmu;
 const CONTAINER = /\b((?:ghcr\.io|quay\.io|docker\.io)\/[a-z0-9._/-]+|anchore\/[a-z0-9._/-]+):([a-z0-9._-]+)(?:@sha256:([a-f0-9]{64}))?/giu;
 const SONAR_ACTION =
-  "SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0";
+  "SonarSource/sonarqube-scan-action@70bad232163b09d998ea0707ee80c0ec80798c16 # v8.5.1";
 const SONAR_IMAGE =
-  "docker.io/library/sonarqube:26.10.0.133078-community@sha256:f95aaa9016dd4e92c7d70691167a6d96dbb5d8acffd61eba1cb4335d364a7840";
+  "docker.io/library/sonarqube:26.11.0.134175-community@sha256:7b2296713a92b8ea0dd7a083a25faadc59376c9a1e6daf2744a89711c54ea1ba";
 const KICS_IMAGE =
-  "docker.io/checkmarx/kics:v2.2.0@sha256:ef29dbac14b046b1ef65f3280646112e927a61781c5f01bca1aeb723e0b96003";
+  "docker.io/checkmarx/kics:v2.2.1@sha256:49ccc54b6ae7f5d5fc95e96f8f95c18c57f3bba047ab611a03d80792bdff6757";
 const KICS_NON_ACTIONABLE_QUERY_IDS =
   "e84eaf4d-2f45-47b2-abe8-e581b06deb66,8c978947-0ff6-485c-b0c2-0bfca6026466";
 const CLIPPY_QUALITY_COMMAND =
@@ -373,7 +373,7 @@ export function validateReleaseMalwareGate(
     if (!health.includes(marker)) violations.push(".github/workflows/standalone-release.yml: engine proof missing " + marker);
   }
   if (!job.includes("      - antivirus-health")) violations.push(".github/workflows/standalone-release.yml: asset scan must wait for engine proof");
-  if (!contents.includes("CLAMAV_IMAGE: docker.io/clamav/clamav:1.5.5@sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8")) {
+  if (!contents.includes("CLAMAV_IMAGE: docker.io/clamav/clamav:1.5.5@sha256:64e30c0bf976198024deb3dc6d5cfe2485fb969c0f73549ba0fdb364b9469614")) {
     violations.push(".github/workflows/standalone-release.yml: official antivirus image digest must stay pinned");
   }
   for (const body of [health, job]) {
@@ -435,7 +435,7 @@ function validateReleaseSbom(validation) {
   const required = [
     'find artifacts -mindepth 2 -maxdepth 2 -type f',
     'codex-purity-guard.mjs sbom-input',
-    'anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a',
+    'anchore/syft:v1.57.2@sha256:e97e20b6e6d1699c60296b66ab337941724f9bd06ac279d893eda89601fc4b2a',
     'sbom-input:/source:ro', 'dir:/source -o spdx-json > release-sbom.spdx.json',
     'codex-purity-guard.mjs release-sbom.spdx.json',
   ];
@@ -636,12 +636,12 @@ export function validateReleaseContainerPublication(contents, targetWorkflow = "
     "cargo install cross --version 0.2.5 --locked",
     "RUSTC_WRAPPER=sccache cargo build --locked",
     "unset GITHUB_TOKEN GH_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL",
-    "npm install --global --ignore-scripts @google/gemini-cli@0.53.0",
+    "npm install --global --ignore-scripts @google/gemini-cli@0.71.1",
     "a8bce4c6b740deb61009e3ad10995ec3027a51e6345025f1a2e5048ffdbf4b84",
     "00efcc2e196f0793d097935d6230062fc66e8247dc01334d2ac3eae4e26a1c7f",
-    "674f61f20ff306f3100cf9200e4c36c4b70278b5bef2884549819b942a89c863",
-    "VERSION=v1.0.77",
-    "https://downloads.claude.ai/claude-code-releases/2.1.220/linux-x64/claude",
+    "4c00839cf46beb2b38ec310105f2d538f7f9321fe46c636299b74bcab94626b1",
+    "VERSION=v1.0.114",
+    "https://downloads.claude.ai/claude-code-releases/2.1.331/linux-x64/claude",
   ]) {
     if (!build.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release build pin missing ${marker}`);
