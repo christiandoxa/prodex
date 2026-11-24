@@ -28,6 +28,14 @@ Qualify Codex CLI 0.172.0 and preserve native session, stream, and tool behavior
 - Upgrade `url` to 2.5.9 and its required `form_urlencoded` dependency to 1.2.3
   to resolve RUSTSEC-2026-0592 without refreshing unrelated dependencies.
 
+## Windows Scan Review
+
+The Windows x64 artifact retains a reviewed ClamAV `Win.Trojan.Virut-225`
+false positive in unchanged expression-destruction code. Acceptance is bound
+to this version and its exact SHA-256, with source, artifact and smoke checks;
+all other findings and scanner errors still block release.
+See the [review and exact hash](https://github.com/christiandoxa/prodex/blob/0.172.0/docs/supply-chain.md).
+
 ## Upstream Compatibility
 
 The standalone wrapper uses a separately installed [Codex CLI 0.172.0](https://github.com/openai/codex/releases/tag/rust-v0.172.0).
