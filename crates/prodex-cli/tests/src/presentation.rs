@@ -7,11 +7,11 @@ fn cli_after_help_preserves_all_original_bytes() {
     for (name, expected_length, expected_hash) in [
         (None, 426, 0x82460174480663e0_u64),
         (Some("profile"), 827, 0x542f61f5b923e4ff_u64),
-        (Some("login"), 724, 0xd5f3c28c01183558_u64),
+        (Some("login"), 847, 0xd78bcaa783a839a0_u64),
         (Some("quota"), 1239, 0x681bf5372c6943af_u64),
         (Some("redeem"), 511, 0xb3a64c323850321a_u64),
         (Some("run"), 980, 0x248df9759a8e94d3_u64),
-        (Some("super"), 4483, 0x9901b75cb564c7d0_u64),
+        (Some("super"), 4514, 0x8b7faa924c27c0a1_u64),
         (Some("doctor"), 230, 0xfe4dbd8f55073010_u64),
         (Some("session"), 355, 0xc11a6d0aafde817a_u64),
     ] {

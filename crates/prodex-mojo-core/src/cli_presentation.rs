@@ -119,11 +119,11 @@ mod tests {
         for (kind, expected_length, expected_hash) in [
             (CliHelpKind::TopLevel, 426, 0x82460174480663e0_u64),
             (CliHelpKind::Profile, 827, 0x542f61f5b923e4ff_u64),
-            (CliHelpKind::Login, 724, 0xd5f3c28c01183558_u64),
+            (CliHelpKind::Login, 847, 0xd78bcaa783a839a0_u64),
             (CliHelpKind::Quota, 1239, 0x681bf5372c6943af_u64),
             (CliHelpKind::Redeem, 511, 0xb3a64c323850321a_u64),
             (CliHelpKind::Run, 980, 0x248df9759a8e94d3_u64),
-            (CliHelpKind::Super, 4483, 0x9901b75cb564c7d0_u64),
+            (CliHelpKind::Super, 4514, 0x8b7faa924c27c0a1_u64),
             (CliHelpKind::Doctor, 230, 0xfe4dbd8f55073010_u64),
             (CliHelpKind::Session, 355, 0xc11a6d0aafde817a_u64),
         ] {

@@ -28,11 +28,11 @@ def check_text(operation: Int64, kind: Int64, expected_length: Int64, expected_h
 def main() raises:
     check_text(0, 0, 426, UInt64(0x82460174480663e0))
     check_text(0, 1, 827, UInt64(0x542f61f5b923e4ff))
-    check_text(0, 2, 724, UInt64(0xd5f3c28c01183558))
+    check_text(0, 2, 847, UInt64(0xd78bcaa783a839a0))
     check_text(0, 3, 1239, UInt64(0x681bf5372c6943af))
     check_text(0, 4, 511, UInt64(0xb3a64c323850321a))
     check_text(0, 5, 980, UInt64(0x248df9759a8e94d3))
-    check_text(0, 6, 4483, UInt64(0x9901b75cb564c7d0))
+    check_text(0, 6, 4514, UInt64(0x8b7faa924c27c0a1))
     check_text(0, 7, 230, UInt64(0xfe4dbd8f55073010))
     check_text(0, 8, 355, UInt64(0xc11a6d0aafde817a))
     check_text(1, 0, 7, UInt64(0x8add349e618ba10e))
