@@ -5655,5 +5655,61 @@
     "error_text": null,
     "expected_error_class": null,
     "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "opencode-go-request-responses-passthrough",
+    "provider": "opencode",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "kimi-k3",
+    "input_headers": {},
+    "input_body": {
+      "model": "kimi-k3",
+      "input": "Summarize the change.",
+      "stream": true
+    },
+    "expected_body": {
+      "model": "kimi-k3",
+      "input": "Summarize the change.",
+      "stream": true
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "opencode-go-response-responses-passthrough",
+    "provider": "opencode",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "kimi-k3",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_example",
+      "object": "response",
+      "model": "kimi-k3",
+      "status": "completed",
+      "output": []
+    },
+    "expected_body": {
+      "id": "resp_example",
+      "object": "response",
+      "model": "kimi-k3",
+      "status": "completed",
+      "output": []
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "opencode-go-stream-event-responses-passthrough",
+    "provider": "opencode",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "kimi-k3",
+    "input_headers": {},
+    "input_body": "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_example\",\"object\":\"response\",\"model\":\"kimi-k3\",\"status\":\"completed\",\"output\":[]}}\n\n",
+    "expected_body": "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_example\",\"object\":\"response\",\"model\":\"kimi-k3\",\"status\":\"completed\",\"output\":[]}}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
   }
 ]

@@ -23,6 +23,7 @@ pub const PROVIDER_IMPLEMENTATION_ORDER: &[ProviderId] = &[
     ProviderId::Gemini,
     ProviderId::Kiro,
     ProviderId::Local,
+    ProviderId::OpenCode,
 ];
 
 static OPENAI_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(ProviderId::OpenAi);
@@ -31,6 +32,8 @@ static COPILOT_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(Pr
 static DEEPSEEK_TRANSLATOR: DeepSeekTranslator = DeepSeekTranslator;
 static GEMINI_TRANSLATOR: GeminiTranslator = GeminiTranslator;
 static KIRO_TRANSLATOR: KiroTranslator = KiroTranslator;
+static OPENCODE_TRANSLATOR: PassthroughTranslator =
+    PassthroughTranslator::new(ProviderId::OpenCode);
 static LOCAL_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(ProviderId::Local);
 
 #[derive(Clone, Copy)]
@@ -199,7 +202,7 @@ mod tests {
     #[test]
     fn provider_registry_keeps_descriptor_and_alias_contracts() {
         use ProviderCapabilityStatus::{Native, Passthrough, Translated};
-        use ProviderId::{Anthropic, Copilot, DeepSeek, Gemini, Kiro, Local, OpenAi};
+        use ProviderId::{Anthropic, Copilot, DeepSeek, Gemini, Kiro, Local, OpenAi, OpenCode};
         use ProviderWireFormat::{GeminiGenerateContent, OpenAiChatCompletions, OpenAiResponses};
 
         let registry = provider_implementation_registry();
@@ -225,10 +228,17 @@ mod tests {
                 (Gemini, GeminiGenerateContent, true, 6, Translated),
                 (Kiro, ProviderWireFormat::Passthrough, false, 5, Translated),
                 (Local, OpenAiResponses, false, 11, Passthrough),
+                (OpenCode, OpenAiResponses, false, 1, Passthrough),
             ]
         );
         assert_eq!(registry.resolve_alias("  OPENAI-compatible "), Some(OpenAi));
         assert_eq!(registry.resolve_alias("claude"), Some(Anthropic));
+        assert_eq!(registry.resolve_alias("OpenCode"), Some(OpenCode));
+        assert_eq!(registry.resolve_model_provider_id("opencode"), None);
+        assert_eq!(
+            registry.resolve_model_provider_id("prodex-opencode"),
+            Some(OpenCode)
+        );
         assert_eq!(registry.resolve_alias("github_copilot"), Some(Copilot));
         assert_eq!(registry.resolve_alias("google"), Some(Gemini));
         assert_eq!(registry.resolve_alias("prodex-openai-governed-http"), None);

@@ -26,7 +26,7 @@ pub struct GatewayArgs {
     #[arg(long, value_name = "ADDR")]
     pub listen: Option<String>,
     /// External provider preset. Omit for an OpenAI-compatible upstream.
-    #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
+    #[arg(long, value_name = "PROVIDER", value_parser = parse_gateway_external_provider)]
     pub provider: Option<SuperExternalProvider>,
     /// Upstream base URL.
     #[arg(long = "base-url", visible_alias = "url", value_name = "URL")]
@@ -121,6 +121,7 @@ pub use prodex_provider_core::{
     PRODEX_LOCAL_DEFAULT_CONTEXT_WINDOW as SUPER_DEFAULT_CONTEXT_WINDOW,
     PRODEX_LOCAL_DEFAULT_MODEL as SUPER_DEFAULT_LOCAL_MODEL,
     PRODEX_LOCAL_PROVIDER_ID as SUPER_LOCAL_PROVIDER_ID,
+    PRODEX_OPENCODE_PROVIDER_ID as SUPER_OPENCODE_PROVIDER_ID,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +131,7 @@ pub enum SuperExternalProvider {
     DeepSeek,
     Gemini,
     Kiro,
+    OpenCode,
 }
 
 impl SuperExternalProvider {
@@ -148,6 +150,7 @@ impl SuperExternalProvider {
             Self::DeepSeek => ProviderId::DeepSeek,
             Self::Gemini => ProviderId::Gemini,
             Self::Kiro => ProviderId::Kiro,
+            Self::OpenCode => ProviderId::OpenCode,
         }
     }
 
@@ -158,6 +161,7 @@ impl SuperExternalProvider {
             ProviderId::DeepSeek => Some(Self::DeepSeek),
             ProviderId::Gemini => Some(Self::Gemini),
             ProviderId::Kiro => Some(Self::Kiro),
+            ProviderId::OpenCode => Some(Self::OpenCode),
             ProviderId::OpenAi | ProviderId::Local => None,
         }
     }
@@ -198,6 +202,14 @@ impl SuperExternalProvider {
     }
 }
 
+fn parse_gateway_external_provider(value: &str) -> Result<SuperExternalProvider, String> {
+    let provider = parse_super_external_provider(value)?;
+    if provider == SuperExternalProvider::OpenCode {
+        return Err("OpenCode Go is available through prodex s --provider opencode".to_string());
+    }
+    Ok(provider)
+}
+
 fn parse_super_external_provider(
     value: &str,
 ) -> std::result::Result<SuperExternalProvider, String> {
@@ -211,10 +223,11 @@ fn parse_super_external_provider(
         Some(ExternalProviderAliasPlan::DeepSeek) => Ok(SuperExternalProvider::DeepSeek),
         Some(ExternalProviderAliasPlan::Gemini) => Ok(SuperExternalProvider::Gemini),
         Some(ExternalProviderAliasPlan::Kiro) => Ok(SuperExternalProvider::Kiro),
+        Some(ExternalProviderAliasPlan::OpenCode) => Ok(SuperExternalProvider::OpenCode),
         None => {
             let other = value.trim().to_ascii_lowercase();
             Err(format!(
-                "invalid --provider: supported values are anthropic, copilot, deepseek, gemini, kiro, got {other:?}"
+                "invalid --provider: supported values are anthropic, copilot, deepseek, gemini, kiro, opencode, got {other:?}"
             ))
         }
     }

@@ -273,6 +273,24 @@ DEEPSEEK_API_KEY=example-key prodex s deepseek
 prodex s --url http://127.0.0.1:8131 --model local-model
 ```
 
+For [OpenCode Go](https://opencode.ai/docs/console/harnesses/codex/), install the
+official Console CLI with Node.js 22 or later, choose your Go workspace in the
+browser, and launch:
+
+```bash
+npm install --global @opencode/console@0.1.16
+prodex login --with-opencode
+prodex s --provider opencode
+prodex s --provider opencode --model kimi-k3
+```
+
+Interactive `prodex login` also offers **Sign in with OpenCode Console**. The
+Console CLI stores and refreshes the workspace sign-in. For headless use, set
+`OPENCODE_API_KEY` to a key from a Go workspace. A configured API key takes
+precedence over browser sign-in. OpenCode Go uses Codex's direct Responses
+transport. If Presidio is enabled in your preferences, use `--no-presidio` for
+this launch. Quota and usage are available in OpenCode Console.
+
 Provider routes and feature support differ; adapter labels do not guarantee
 complete native-provider fidelity. Check the generated
 [provider matrix](docs/provider-capabilities.md) and local-model notes in

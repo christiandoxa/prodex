@@ -183,7 +183,7 @@ def prodex_provider_surface_label_v1(
 
     var label = StringSlice("")
     if label_kind == PROVIDER_SURFACE_LABEL_PROVIDER_ID:
-        if value < 0 or value > 6:
+        if value < 0 or value > 7:
             return PROVIDER_BRIDGE_METADATA_INVALID
         if value == 0:
             label = StringSlice("openai")
@@ -197,8 +197,10 @@ def prodex_provider_surface_label_v1(
             label = StringSlice("gemini")
         elif value == 5:
             label = StringSlice("kiro")
-        else:
+        elif value == 6:
             label = StringSlice("local")
+        else:
+            label = StringSlice("opencode")
     elif label_kind == PROVIDER_SURFACE_LABEL_WIRE_FORMAT:
         if value < 0 or value > 4:
             return PROVIDER_BRIDGE_METADATA_INVALID

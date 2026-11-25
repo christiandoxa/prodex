@@ -70,6 +70,7 @@ enum LoginMethod {
     Claude,
     Antigravity,
     Status,
+    OpenCode,
 }
 
 struct LoginRequest {
@@ -100,6 +101,21 @@ pub(crate) fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
         ResolvedLoginRequest::Login(login_request) => login_request,
         ResolvedLoginRequest::ImportCopilot => return handle_copilot_login_import(),
     };
+    if login_request.method == LoginMethod::OpenCode {
+        if selected_profile.is_some() {
+            bail!(
+                "OpenCode Console sign-in is shared by the Console CLI and does not use Prodex profiles"
+            );
+        }
+        if login_request
+            .codex_args
+            .iter()
+            .any(|arg| arg != "--with-opencode")
+        {
+            bail!("OpenCode Console sign-in takes no other login options");
+        }
+        return exit_with_status(crate::runtime_opencode_auth::run_opencode_login()?);
+    }
     if login_request.method == LoginMethod::Antigravity {
         if selected_profile.is_some() {
             bail!("Antigravity login is global to the `agy` CLI and does not use Prodex profiles");
@@ -528,7 +544,9 @@ fn login_request_for_method(
                 api_key_profile_name,
             })
         }
-        LoginMethod::Claude => login_request_without_base_url(method, openai_base_url_specified),
+        LoginMethod::Claude | LoginMethod::OpenCode => {
+            login_request_without_base_url(method, openai_base_url_specified)
+        }
         LoginMethod::Antigravity => {
             if openai_base_url_specified {
                 bail!("--base-url is not supported for Antigravity login");

@@ -20,6 +20,7 @@ pub enum LoginArgumentMethod {
     Claude,
     Antigravity,
     Status,
+    OpenCode,
 }
 
 #[repr(i64)]
@@ -531,6 +532,7 @@ pub fn login_argument_plan(arguments: &[Option<&str>]) -> Result<LoginArgumentPl
         4 => LoginArgumentMethod::Claude,
         5 => LoginArgumentMethod::Antigravity,
         6 => LoginArgumentMethod::Status,
+        7 => LoginArgumentMethod::OpenCode,
         _ => return Err(MojoError::InvalidOutput),
     };
     Ok(LoginArgumentPlan {

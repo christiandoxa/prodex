@@ -269,6 +269,12 @@ impl RuntimeToolLaunchStrategy {
         if self.provider_runtime_uses_local_proxy_auth() {
             force_codex_api_key_auth_for_provider_runtime(child);
             remove_provider_secret_env(child);
+        } else if self.args.external_provider == Some(SuperExternalProvider::OpenCode) {
+            remove_provider_secret_env(child);
+            crate::runtime_opencode_auth::apply_opencode_key_to_child(
+                child,
+                self.args.external_provider_api_key.as_deref(),
+            );
         }
         prepend_child_path(child, overlay_home.join("bin"));
         if self.rtk_enabled {
@@ -289,7 +295,9 @@ impl RuntimeToolLaunchStrategy {
 
 impl RuntimeToolLaunchStrategy {
     fn provider_runtime_uses_local_proxy_auth(&self) -> bool {
-        self.args.external_provider.is_some()
+        self.args
+            .external_provider
+            .is_some_and(|provider| provider != SuperExternalProvider::OpenCode)
             || self.model_provider_override.as_deref() == Some(SUPER_LOCAL_PROVIDER_ID)
     }
 }

@@ -21,6 +21,7 @@ pub(super) fn infer_login_method(codex_args: &[OsString]) -> LoginMethod {
         prodex_mojo_core::launch::LoginArgumentMethod::Claude => LoginMethod::Claude,
         prodex_mojo_core::launch::LoginArgumentMethod::Antigravity => LoginMethod::Antigravity,
         prodex_mojo_core::launch::LoginArgumentMethod::Status => LoginMethod::Status,
+        prodex_mojo_core::launch::LoginArgumentMethod::OpenCode => LoginMethod::OpenCode,
     }
 }
 

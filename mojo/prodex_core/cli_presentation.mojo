@@ -93,13 +93,15 @@ def cli_help_text(kind: Int64) -> ProdexRichStringView:
             "  prodex login --profile main\n"
             "  prodex login --device-auth\n"
             "  prodex login --with-claude\n"
-            "  prodex login --with-antigravity\n\n"
+            "  prodex login --with-antigravity\n"
+            "  prodex login --with-opencode\n\n"
             "Notes:\n"
             "  A leading non-option argument selects the profile; `status` remains Codex login status.\n"
             "  Use --profile when selecting a profile literally named `status`.\n"
             "  OpenAI/Codex, Claude, and API-key login paths create or update Prodex profiles.\n"
             "  Google Gemini OAuth profiles are unsupported; native Gemini CLI / Vertex AI compatibility is retired. Use a Gemini API key with `prodex s gemini`; native Antigravity remains available through `prodex s gemini --cli agy`.\n"
-            "  Antigravity login delegates to `agy auth login` and does not create a Prodex profile."
+            "  Antigravity login delegates to `agy auth login` and does not create a Prodex profile.\n"
+            "  OpenCode login uses the OpenCode Console CLI. Launch with `prodex s --provider opencode`."
         ))
     if kind == CLI_HELP_QUOTA:
         return cli_literal(StringSlice(
@@ -166,6 +168,7 @@ def cli_help_text(kind: Int64) -> ProdexRichStringView:
             "  prodex super gemini\n"
             "  prodex super gemini\n"
             "  prodex super --provider copilot\n"
+            "  prodex s --provider opencode\n"
             "  prodex super --provider kiro --profile kiro-main\n"
             "  prodex super gemini --cli agy\n"
             "  prodex super --sub-agent --sub-agent-provider openai --sub-agent-model gpt-5.3-codex\n"

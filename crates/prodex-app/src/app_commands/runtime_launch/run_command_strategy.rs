@@ -82,6 +82,12 @@ impl RunCommandStrategy {
         } else {
             None
         };
+        if auto_external_provider == Some(SuperExternalProvider::OpenCode) {
+            anyhow::ensure!(
+                args.base_url.is_none(),
+                "OpenCode Go uses a fixed upstream URL"
+            );
+        }
         let auto_external_provider_base_url = auto_external_provider.map(|provider| {
             args.base_url
                 .as_deref()
@@ -98,11 +104,25 @@ impl RunCommandStrategy {
                 None,
                 None,
             );
-            remove_first_codex_config_override_pair(&mut provider_args, "model");
+            if provider != SuperExternalProvider::OpenCode
+                || model_is_explicit
+                || session_settings
+                    .as_ref()
+                    .is_some_and(|settings| settings.model.is_some())
+            {
+                remove_first_codex_config_override_pair(&mut provider_args, "model");
+            }
             let mut next_args = Vec::with_capacity(provider_args.len() + codex_args.len());
             next_args.extend(provider_args);
             next_args.extend(codex_args);
             codex_args = next_args;
+            if provider == SuperExternalProvider::OpenCode {
+                crate::runtime_opencode_auth::configure_opencode_codex_args(
+                    &mut codex_args,
+                    None,
+                    dry_run,
+                )?;
+            }
             model_provider_override = Some(provider.model_provider_id().to_string());
             model_context_window_tokens =
                 runtime_launch_cli_model_context_window_tokens(&codex_args);
@@ -258,6 +278,9 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             codex_tui_child_plan(prepared.codex_home.clone(), runtime_args)
         };
         isolate_auto_external_provider_child_env(self.auto_external_provider, &mut child);
+        if self.auto_external_provider == Some(SuperExternalProvider::OpenCode) {
+            crate::runtime_opencode_auth::apply_opencode_key_to_child(&mut child, None);
+        }
         if self.args.no_proxy && runtime_proxy.is_none() {
             remove_upstream_proxy_env(&mut child);
         }

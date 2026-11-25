@@ -166,6 +166,7 @@ pub fn external_provider_alias(
         2 => Ok(Some(ExternalProviderAliasPlan::DeepSeek)),
         3 => Ok(Some(ExternalProviderAliasPlan::Gemini)),
         4 => Ok(Some(ExternalProviderAliasPlan::Kiro)),
+        5 => Ok(Some(ExternalProviderAliasPlan::OpenCode)),
         _ => Err(MojoError::InvalidOutput),
     }
 }

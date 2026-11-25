@@ -36,6 +36,8 @@ pub enum ProviderId {
     Kiro,
     #[serde(rename = "local")]
     Local,
+    #[serde(rename = "opencode")]
+    OpenCode,
 }
 
 impl ProviderId {

@@ -36,6 +36,7 @@ fn aliases(provider: ProviderId) -> &'static [&'static str] {
         ProviderId::Anthropic => &["claude"],
         ProviderId::Copilot => &["github-copilot", "github_copilot"],
         ProviderId::DeepSeek | ProviderId::Kiro => &[],
+        ProviderId::OpenCode => &["opencode-go"],
         ProviderId::Gemini => &["google"],
         ProviderId::Local => &["local-openai", "local_openai"],
     }
@@ -50,6 +51,7 @@ fn translator(provider: ProviderId) -> &'static dyn ProviderTranslator {
         ProviderId::Gemini => &GEMINI_TRANSLATOR,
         ProviderId::Kiro => &KIRO_TRANSLATOR,
         ProviderId::Local => &LOCAL_TRANSLATOR,
+        ProviderId::OpenCode => &OPENCODE_TRANSLATOR,
     }
 }
 

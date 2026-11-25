@@ -72,6 +72,7 @@ mod runtime_kiro_acp;
 mod runtime_launch;
 mod runtime_launch_shared;
 mod runtime_local_provider_config;
+mod runtime_opencode_auth;
 mod runtime_operational_metrics;
 mod runtime_panic;
 mod runtime_persistence;

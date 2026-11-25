@@ -133,6 +133,7 @@ pub(super) fn api_key_env(args: &SuperArgs) -> Option<(&'static str, &str)> {
         SuperExternalProvider::Copilot => ("GITHUB_COPILOT_API_KEY", key),
         SuperExternalProvider::DeepSeek => ("DEEPSEEK_API_KEY", key),
         SuperExternalProvider::Gemini => ("GEMINI_API_KEY", key),
+        SuperExternalProvider::OpenCode => (crate::runtime_opencode_auth::OPENCODE_API_KEY, key),
         SuperExternalProvider::Kiro => return None,
     })
 }

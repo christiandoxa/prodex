@@ -136,6 +136,14 @@ fn login_menu_entries() -> &'static [LoginMenuEntry] {
             command: "prodex profile import copilot",
             action: LoginMenuAction::Guidance(LoginGuidanceKind::CopilotImport),
         },
+        LoginMenuEntry {
+            title: "Sign in with OpenCode Console",
+            provider: "OpenCode Go",
+            auth: "OpenCode Console browser sign-in",
+            usage: "Pick a workspace with a Go subscription and launch Codex through OpenCode Go.",
+            command: "prodex login --with-opencode",
+            action: LoginMenuAction::Method(LoginMethod::OpenCode),
+        },
     ];
     ENTRIES
 }

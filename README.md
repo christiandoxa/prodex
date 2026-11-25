@@ -76,6 +76,7 @@ Prodex supports two provider paths:
 | Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | OAuth profiles | Shows Claude OAuth readiness; add `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups. |
 | GitHub Copilot | `prodex s --provider copilot` or `prodex s --provider copilot --cli copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY(S)` / `--api-key` | Imported profiles | Codex and native Copilot CLI front ends use the Prodex Responses adapter; fresh requests can rotate before commit and continuations stay bound to the owning profile. |
 | Kiro CLI | `prodex s --provider kiro` or `prodex super --cli kiro` | Imported Kiro CLI profile via `prodex profile import kiro` | Imported profiles | Codex uses Prodex's Kiro ACP adapter; native Kiro uses an authenticated loopback CONNECT tunnel while its proprietary TLS payload remains opaque. |
+| OpenCode Go | `prodex s --provider opencode` | Console browser sign-in via `prodex login --with-opencode`, or `OPENCODE_API_KEY` | Console-owned | Uses the Go subscription workspace and Codex Responses transport. |
 | DeepSeek | `prodex s deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | API-key balance | `prodex quota --all --provider deepseek` reads DeepSeek `/user/balance`. |
 | Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
 | Bedrock / custom Codex `model_provider` | `prodex run` / `prodex super` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
@@ -339,9 +340,10 @@ prodex profile add second
 prodex login second
 prodex login --with-claude
 prodex login --with-antigravity
+prodex login --with-opencode
 ```
 
-Interactive `prodex login` asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, API-key login, Claude sign-in through Claude Code OAuth, or Antigravity CLI sign-in through `agy auth login`. The Codex-fronted Gemini bridge uses an API key; supported Vertex AI authentication belongs only to the native Gemini CLI. Antigravity login is global to the `agy` CLI and does not create a Prodex profile. For API-key profiles, you can also set an OpenAI-compatible backend URL:
+Interactive `prodex login` asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, API-key login, Claude sign-in through Claude Code OAuth, Antigravity CLI sign-in through `agy auth login`, or OpenCode Console sign-in. The Codex-fronted Gemini bridge uses an API key; supported Vertex AI authentication belongs only to the native Gemini CLI. Antigravity login is global to the `agy` CLI and does not create a Prodex profile. For API-key profiles, you can also set an OpenAI-compatible backend URL:
 
 ```bash
 printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1

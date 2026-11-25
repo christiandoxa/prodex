@@ -42,7 +42,7 @@ use {preflight::*, provider_names::*, providers::*, resume_repair::*};
 pub(crate) fn resolved_super_runtime_tool_args(
     args: SuperArgs,
     presidio: bool,
-) -> Result<RuntimeToolArgs, prodex_cli::RuntimeFeaturePlanError> {
+) -> Result<RuntimeToolArgs> {
     let normalized = prodex_runtime_launch::normalize_run_codex_args(&args.codex_args);
     let is_resume = prodex_runtime_launch::codex_resume_requested(&normalized);
     let model_is_explicit = args.local_model.is_some()
@@ -52,8 +52,20 @@ pub(crate) fn resolved_super_runtime_tool_args(
     let session_settings = is_resume
         .then(|| runtime_resume_session_settings_from_codex_args(&normalized))
         .flatten();
+    let opencode = args.provider == Some(SuperExternalProvider::OpenCode);
+    if opencode {
+        anyhow::ensure!(
+            args.base_url.is_none(),
+            "OpenCode Go uses a fixed upstream URL"
+        );
+    }
     let mut runtime_args = args.into_runtime_tool_args_with_presidio(presidio)?;
-    if !model_is_explicit {
+    if !model_is_explicit
+        && (!opencode
+            || session_settings
+                .as_ref()
+                .is_some_and(|settings| settings.model.is_some()))
+    {
         remove_first_codex_config_override_pair(&mut runtime_args.codex_args, "model");
     }
     remove_resume_generated_effort_override(
@@ -67,6 +79,14 @@ pub(crate) fn resolved_super_runtime_tool_args(
         model_is_explicit,
         effort_is_explicit,
     );
+    if opencode {
+        let dry_run = runtime_args.dry_run || prodex_dry_run_requested(&runtime_args.codex_args);
+        crate::runtime_opencode_auth::configure_opencode_codex_args(
+            &mut runtime_args.codex_args,
+            runtime_args.external_provider_api_key.as_deref(),
+            dry_run,
+        )?;
+    }
     Ok(runtime_args)
 }
 
@@ -534,6 +554,12 @@ fn validate_runtime_launch_upstream_base_url(
     selection: &RuntimeLaunchSelection,
     request: &RuntimeLaunchRequest<'_>,
 ) -> Result<()> {
+    if request.external_provider == Some(SuperExternalProvider::OpenCode.as_str()) {
+        anyhow::ensure!(
+            !request.presidio_redaction_enabled,
+            "OpenCode Go uses Codex's direct transport. Use --no-presidio for this launch."
+        );
+    }
     if let Some(base_url) = request.base_url {
         validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
     }

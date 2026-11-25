@@ -331,7 +331,9 @@ fn optional_catalog_file(provider: ProviderId) -> Option<&'static str> {
         ProviderId::DeepSeek => Some("prodex-deepseek-model-catalog.json"),
         ProviderId::Gemini => Some("prodex-gemini-model-catalog.json"),
         ProviderId::Local => Some("prodex-local-model-catalog.json"),
-        ProviderId::Anthropic | ProviderId::Copilot | ProviderId::Kiro => None,
+        ProviderId::Anthropic | ProviderId::Copilot | ProviderId::Kiro | ProviderId::OpenCode => {
+            None
+        }
     }
 }
 
@@ -340,9 +342,11 @@ fn profile_catalog_file(provider: ProviderId) -> Option<&'static str> {
         ProviderId::Copilot => Some(COPILOT_RUNTIME_MODEL_CATALOG_FILE),
         ProviderId::Gemini => Some("prodex-gemini-model-catalog.json"),
         ProviderId::Kiro => Some(KIRO_MODEL_CATALOG_FILE),
-        ProviderId::OpenAi | ProviderId::Anthropic | ProviderId::DeepSeek | ProviderId::Local => {
-            None
-        }
+        ProviderId::OpenAi
+        | ProviderId::Anthropic
+        | ProviderId::DeepSeek
+        | ProviderId::Local
+        | ProviderId::OpenCode => None,
     }
 }
 
@@ -414,9 +418,11 @@ pub(crate) fn provider_model_choices_from_discovery(
 ) -> Vec<ProviderModelChoice> {
     let account_inventory = match provider {
         ProviderId::OpenAi | ProviderId::Copilot | ProviderId::Kiro => true,
-        ProviderId::Anthropic | ProviderId::DeepSeek | ProviderId::Gemini | ProviderId::Local => {
-            false
-        }
+        ProviderId::Anthropic
+        | ProviderId::DeepSeek
+        | ProviderId::Gemini
+        | ProviderId::Local
+        | ProviderId::OpenCode => false,
     };
     if discovered.is_empty() {
         canonical_sub_agent_model_choices(provider, current_model)

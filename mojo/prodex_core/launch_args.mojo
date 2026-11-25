@@ -94,6 +94,7 @@ comptime LOGIN_METHOD_ACCESS_TOKEN: Int64 = 3
 comptime LOGIN_METHOD_CLAUDE: Int64 = 4
 comptime LOGIN_METHOD_ANTIGRAVITY: Int64 = 5
 comptime LOGIN_METHOD_STATUS: Int64 = 6
+comptime LOGIN_METHOD_OPENCODE: Int64 = 7
 comptime SUPER_VALUE_KIND_LAST: Int64 = 23
 
 
@@ -538,6 +539,7 @@ def launch_login_policy(
     var has_api_key = False
     var has_claude = False
     var has_antigravity = False
+    var has_opencode = False
     var has_access_token = False
     var has_device_code = False
     var removed_gemini = False
@@ -562,6 +564,8 @@ def launch_login_policy(
             or launch_is["--agy"](arg)
         ):
             has_antigravity = True
+        elif launch_is["--with-opencode"](arg):
+            has_opencode = True
         elif launch_is["--with-access-token"](arg):
             has_access_token = True
         elif launch_is["--device-auth"](arg):
@@ -570,7 +574,9 @@ def launch_login_policy(
             removed_gemini = True
 
     var method = LOGIN_METHOD_CHATGPT
-    if has_api_key:
+    if has_opencode:
+        method = LOGIN_METHOD_OPENCODE
+    elif has_api_key:
         method = LOGIN_METHOD_API_KEY
     elif has_claude:
         method = LOGIN_METHOD_CLAUDE

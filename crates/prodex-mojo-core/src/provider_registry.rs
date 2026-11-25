@@ -1,7 +1,7 @@
 use crate::MojoError;
 
 pub const PROVIDER_REGISTRY_ABI_VERSION: i64 = 1;
-pub const PROVIDER_REGISTRY_PROVIDER_COUNT: usize = 7;
+pub const PROVIDER_REGISTRY_PROVIDER_COUNT: usize = 8;
 pub const PROVIDER_REGISTRY_ENDPOINT_COUNT: usize = 11;
 pub const PROVIDER_RUNTIME_METADATA_ABI_VERSION: i64 = 1;
 const PROVIDER_RUNTIME_METADATA_FIELD_COUNT: usize = 6;
@@ -374,6 +374,18 @@ mod tests {
                 None,
                 16_384,
                 14_000,
+                "disabled",
+                false,
+            ),
+            (
+                7,
+                "prodex-opencode",
+                "OpenCode Go",
+                "OpenCode Go",
+                "kimi-k3",
+                Some("https://opencode.ai/inference/go/openai/v1"),
+                262_144,
+                230_000,
                 "disabled",
                 false,
             ),

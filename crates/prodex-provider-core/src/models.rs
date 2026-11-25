@@ -1,15 +1,7 @@
 use super::{ProviderId, ProviderModelCost, ProviderModelSpec};
 use std::sync::LazyLock;
 
-const PROVIDERS: [ProviderId; 7] = [
-    ProviderId::OpenAi,
-    ProviderId::Anthropic,
-    ProviderId::Copilot,
-    ProviderId::DeepSeek,
-    ProviderId::Gemini,
-    ProviderId::Kiro,
-    ProviderId::Local,
-];
+const PROVIDERS: &[ProviderId] = crate::PROVIDER_IMPLEMENTATION_ORDER;
 
 fn provider_index(provider: ProviderId) -> usize {
     PROVIDERS
@@ -45,7 +37,7 @@ fn build_catalog(provider: ProviderId) -> Box<[ProviderModelSpec]> {
         .into_boxed_slice()
 }
 
-static MODEL_CATALOGS: LazyLock<[Box<[ProviderModelSpec]>; 7]> =
+static MODEL_CATALOGS: LazyLock<[Box<[ProviderModelSpec]>; PROVIDERS.len()]> =
     LazyLock::new(|| std::array::from_fn(|index| build_catalog(PROVIDERS[index])));
 
 pub(crate) fn builtin_model_catalog(provider: ProviderId) -> &'static [ProviderModelSpec] {

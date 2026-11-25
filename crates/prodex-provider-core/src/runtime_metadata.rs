@@ -2,6 +2,10 @@ use std::sync::OnceLock;
 
 use crate::ProviderId;
 
+const PROVIDER_COUNT: usize = prodex_mojo_core::provider_registry::PROVIDER_REGISTRY_PROVIDER_COUNT;
+
+pub const PRODEX_OPENCODE_PROVIDER_ID: &str = "prodex-opencode";
+
 pub const PRODEX_LOCAL_PROVIDER_ID: &str = "prodex-local";
 pub const PRODEX_LOCAL_PROVIDER_NAME: &str = "Prodex Local";
 pub const PRODEX_LOCAL_DEFAULT_MODEL: &str = "unsloth/qwen3.5-35b-a3b";
@@ -78,17 +82,12 @@ fn load_runtime_metadata(provider: ProviderId) -> ProviderRuntimeMetadata {
     }
 }
 
-fn all_runtime_metadata() -> [Option<ProviderRuntimeMetadata>; 7] {
-    let mut metadata = [None; 7];
-    for provider in [
-        ProviderId::Anthropic,
-        ProviderId::Copilot,
-        ProviderId::DeepSeek,
-        ProviderId::Gemini,
-        ProviderId::Kiro,
-        ProviderId::Local,
-    ] {
-        metadata[provider as usize] = Some(load_runtime_metadata(provider));
+fn all_runtime_metadata() -> [Option<ProviderRuntimeMetadata>; PROVIDER_COUNT] {
+    let mut metadata = [None; PROVIDER_COUNT];
+    for &provider in crate::PROVIDER_IMPLEMENTATION_ORDER {
+        if provider != ProviderId::OpenAi {
+            metadata[provider as usize] = Some(load_runtime_metadata(provider));
+        }
     }
     metadata
 }
@@ -103,7 +102,8 @@ pub fn provider_runtime_metadata(provider: ProviderId) -> Option<&'static Provid
         .and_then(|metadata| metadata.as_ref())
 }
 
-static RUNTIME_METADATA: OnceLock<[Option<ProviderRuntimeMetadata>; 7]> = OnceLock::new();
+static RUNTIME_METADATA: OnceLock<[Option<ProviderRuntimeMetadata>; PROVIDER_COUNT]> =
+    OnceLock::new();
 
 pub fn copilot_prompt_token_limit_for_model(model: &str) -> Option<usize> {
     prodex_mojo_core::provider_constraints::provider_copilot_prompt_token_limit(model)
@@ -128,6 +128,7 @@ mod tests {
             ProviderId::Gemini,
             ProviderId::Kiro,
             ProviderId::Local,
+            ProviderId::OpenCode,
         ] {
             let metadata = provider_runtime_metadata(provider).expect("metadata should exist");
             assert_eq!(metadata.provider, provider);

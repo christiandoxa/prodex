@@ -425,3 +425,140 @@ fn runtime_goal_notify_rejects_an_invalid_marker_path() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn opencode_login_and_super_launch_share_the_console_auth_helper() {
+    let temp = TestDir::new();
+    let home = &temp.path;
+    let cli = home.join("opencode-console");
+    let codex = home.join("fixture-codex");
+    let signed_in = home.join("signed-in");
+    let launch_args = home.join("launch-args");
+    fs::write(
+        &cli,
+        r#"#!/bin/sh
+case "$*" in
+    login) test -z "${OPENCODE_API_KEY:-}" && touch "$FIXTURE_SIGNED_IN" ;;
+    token) test -f "$FIXTURE_SIGNED_IN" && printf '%s\n' fixture-console-token ;;
+    *) exit 89 ;;
+esac
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &codex,
+        r#"#!/bin/sh
+case "$*" in
+    --version) echo 'codex-cli 0.172.0'; exit ;;
+    'app-server --help') exit ;;
+    *'app-server --stdio')
+        while IFS= read -r request; do
+            case "$request" in
+                *'"id":1,'*) echo '{"jsonrpc":"2.0","id":1,"result":{}}' ;;
+                *'"id":2,'*) echo '{"jsonrpc":"2.0","id":2,"result":{"data":[]}}' ;;
+                *'"id":4,'*) echo '{"jsonrpc":"2.0","id":4,"result":{"data":[]}}' ;;
+            esac
+        done
+        exit
+        ;;
+esac
+printf '%s\n' "$@" > "$FIXTURE_LAUNCH_ARGS"
+test -z "${OPENAI_API_KEY:-}" || exit 90
+if test -z "${OPENCODE_API_KEY:-}"; then
+    test "$(opencode-console token)" = fixture-console-token || exit 91
+fi
+"#,
+    )
+    .unwrap();
+    for binary in [&cli, &codex] {
+        fs::set_permissions(binary, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let prodex = || {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_prodex"));
+        cmd.current_dir(home)
+            .env("HOME", home)
+            .env("PRODEX_HOME", home.join("prodex"))
+            .env("PRODEX_SHARED_CODEX_HOME", home.join("shared"))
+            .env("CODEX_HOME", home.join("codex"))
+            .env("CLAUDE_CONFIG_DIR", home.join("claude"))
+            .env("PRODEX_RUNTIME_LOG_DIR", home.join("runtime"))
+            .env("PRODEX_CODEX_BIN", &codex)
+            .env("FIXTURE_SIGNED_IN", &signed_in)
+            .env("FIXTURE_LAUNCH_ARGS", &launch_args)
+            .env(
+                "PATH",
+                std::env::join_paths([
+                    home.as_path(),
+                    std::path::Path::new("/usr/bin"),
+                    std::path::Path::new("/bin"),
+                ])
+                .unwrap(),
+            )
+            .env_remove("OPENCODE_API_KEY")
+            .env("OPENAI_API_KEY", "fixture-unrelated-key");
+        cmd
+    };
+
+    let login = prodex()
+        .args(["login", "--with-opencode"])
+        .env("OPENCODE_API_KEY", "fixture-unused-key")
+        .output()
+        .unwrap();
+    assert!(
+        login.status.success(),
+        "{}",
+        String::from_utf8_lossy(&login.stderr)
+    );
+    assert!(signed_in.exists());
+
+    for key in [None, Some("fixture-opencode-key")] {
+        let mut cmd = prodex();
+        if let Some(key) = key {
+            cmd.env("OPENCODE_API_KEY", key);
+        }
+        let launch = cmd
+            .args([
+                "s",
+                "--provider",
+                "opencode",
+                "--no-presidio",
+                "--no-sub-agent",
+                "exec",
+                "hello",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            launch.status.success(),
+            "{}",
+            String::from_utf8_lossy(&launch.stderr)
+        );
+        let argv = fs::read_to_string(&launch_args).unwrap();
+        assert!(
+            argv.contains("model_provider=\"prodex-opencode\""),
+            "{argv}"
+        );
+        assert!(argv.contains("model=\"kimi-k3\""), "{argv}");
+        let provider = argv
+            .lines()
+            .find(|arg| arg.starts_with("model_providers.prodex-opencode={"))
+            .expect("OpenCode provider table should be present");
+        assert!(
+            provider.contains("https://opencode.ai/inference/go/openai/v1"),
+            "{provider}"
+        );
+        assert!(provider.contains("wire_api = \"responses\""), "{provider}");
+        if let Some(key) = key {
+            assert!(
+                provider.contains("env_key = \"OPENCODE_API_KEY\""),
+                "{provider}"
+            );
+            assert!(!argv.contains(key));
+        } else {
+            assert!(provider.contains(cli.to_str().unwrap()), "{provider}");
+            assert!(provider.contains("args = [\"token\"]"), "{provider}");
+        }
+        assert!(!argv.contains("fixture-console-token"));
+    }
+}

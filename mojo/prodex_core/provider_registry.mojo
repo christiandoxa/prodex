@@ -9,7 +9,7 @@ comptime PROVIDER_REGISTRY_STATUS_OK: Int64 = 0
 comptime PROVIDER_REGISTRY_STATUS_INVALID: Int64 = 1
 comptime PROVIDER_REGISTRY_STATUS_UTF8: Int64 = 2
 comptime PROVIDER_REGISTRY_STATUS_ABI: Int64 = 4
-comptime PROVIDER_REGISTRY_PROVIDER_COUNT: Int64 = 7
+comptime PROVIDER_REGISTRY_PROVIDER_COUNT: Int64 = 8
 comptime PROVIDER_REGISTRY_ENDPOINT_COUNT: Int64 = 11
 
 comptime PROVIDER_RUNTIME_METADATA_ABI_VERSION: Int64 = 1
@@ -28,6 +28,7 @@ comptime PROVIDER_DEEPSEEK: Int64 = 3
 comptime PROVIDER_GEMINI: Int64 = 4
 comptime PROVIDER_KIRO: Int64 = 5
 comptime PROVIDER_LOCAL: Int64 = 6
+comptime PROVIDER_OPENCODE: Int64 = 7
 
 comptime WIRE_OPENAI_RESPONSES: Int64 = 0
 comptime WIRE_OPENAI_CHAT: Int64 = 1
@@ -98,6 +99,9 @@ def runtime_metadata_plan(provider: Int64) -> ProdexProviderRuntimeMetadataPlan:
     elif provider == PROVIDER_KIRO:
         context_window = 1_000_000
         auto_compact_limit = 950_000
+    elif provider == PROVIDER_OPENCODE:
+        context_window = 262_144
+        auto_compact_limit = 230_000
     return ProdexProviderRuntimeMetadataPlan(
         PROVIDER_RUNTIME_METADATA_ABI_VERSION,
         provider,
@@ -192,6 +196,20 @@ def runtime_metadata_label(
             label = StringSlice("https://kiro.dev")
         elif field == PROVIDER_RUNTIME_METADATA_WEB_SEARCH_MODE:
             label = StringSlice("live")
+    elif provider == PROVIDER_OPENCODE:
+        if field == PROVIDER_RUNTIME_METADATA_MODEL_PROVIDER_ID:
+            label = StringSlice("prodex-opencode")
+        elif (
+            field == PROVIDER_RUNTIME_METADATA_DISPLAY_NAME
+            or field == PROVIDER_RUNTIME_METADATA_CODEX_PROVIDER_NAME
+        ):
+            label = StringSlice("OpenCode Go")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_MODEL:
+            label = StringSlice("kimi-k3")
+        elif field == PROVIDER_RUNTIME_METADATA_DEFAULT_BASE_URL:
+            label = StringSlice("https://opencode.ai/inference/go/openai/v1")
+        elif field == PROVIDER_RUNTIME_METADATA_WEB_SEARCH_MODE:
+            label = StringSlice("disabled")
     return ProdexRichStringView(
         UInt(Int(label.unsafe_ptr())), UInt(label.byte_length())
     )
@@ -348,6 +366,10 @@ def registry_plan(provider: Int64) -> ProdexProviderRegistryPlan:
         for endpoint in range(PROVIDER_REGISTRY_ENDPOINT_COUNT):
             bits = capability_set(bits, endpoint, CAP_PASSTHROUGH)
         bits = capability_set(bits, END_RESPONSES_COMPACT, CAP_EMULATED)
+    elif provider == PROVIDER_OPENCODE:
+        supported = endpoint_bit(END_RESPONSES)
+        passthrough = supported
+        bits = capability_set(bits, END_RESPONSES, CAP_PASSTHROUGH)
     return ProdexProviderRegistryPlan(PROVIDER_REGISTRY_ABI_VERSION, provider, WIRE_OPENAI_RESPONSES, upstream, WIRE_OPENAI_RESPONSES, 1, fallback, supported, passthrough, bits)
 
 
@@ -387,14 +409,19 @@ def registry_alias_provider(view: ProdexRichStringView) -> Int64:
         return PROVIDER_KIRO
     if rich_view_matches_literal["local"](value, True) or rich_view_matches_literal["local-openai"](value, True) or rich_view_matches_literal["local_openai"](value, True):
         return PROVIDER_LOCAL
+    if rich_view_matches_literal["opencode"](value, True) or rich_view_matches_literal["opencode-go"](value, True):
+        return PROVIDER_OPENCODE
     return -1
 
 
 def registry_model_provider(view: ProdexRichStringView) -> Int64:
+    var value = registry_trimmed(view)
+    # OpenCode's Codex preset uses this ID for its pay-as-you-go endpoint.
+    if rich_view_matches_literal["opencode"](value, True):
+        return -1
     var resolved_alias = registry_alias_provider(view)
     if resolved_alias >= 0:
         return resolved_alias
-    var value = registry_trimmed(view)
     if rich_view_matches_literal["prodex-openai-governed-http"](value, True):
         return PROVIDER_OPENAI
     if rich_view_matches_literal["prodex-anthropic"](value, True):
@@ -409,6 +436,8 @@ def registry_model_provider(view: ProdexRichStringView) -> Int64:
         return PROVIDER_KIRO
     if rich_view_matches_literal["prodex-local"](value, True):
         return PROVIDER_LOCAL
+    if rich_view_matches_literal["prodex-opencode"](value, True):
+        return PROVIDER_OPENCODE
     return -1
 
 

@@ -7,6 +7,7 @@ pub enum ExternalProviderAliasPlan {
     DeepSeek,
     Gemini,
     Kiro,
+    OpenCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

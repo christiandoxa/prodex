@@ -273,6 +273,8 @@ def prodex_super_external_provider_alias_v1(
         return 3
     if config_range_equals["kiro"](view, start, end):
         return 4
+    if config_range_equals["opencode"](view, start, end) or config_range_equals["opencode-go"](view, start, end):
+        return 5
     return -1
 
 
@@ -712,9 +714,14 @@ def prodex_super_provider_config_v1(
                 ".wire_api=", "\"responses\""
             ](provider_id, output, output_capacity, written)
         elif index == 5:
-            ok = config_put_provider_key_literal[
-                ".requires_openai_auth=", "true"
-            ](provider_id, output, output_capacity, written)
+            if config_range_equals["prodex-opencode"](provider_id, 0, Int64(provider_id.len)):
+                ok = config_put_provider_key_literal[
+                    ".requires_openai_auth=", "false"
+                ](provider_id, output, output_capacity, written)
+            else:
+                ok = config_put_provider_key_literal[
+                    ".requires_openai_auth=", "true"
+                ](provider_id, output, output_capacity, written)
         elif index == 6:
             ok = config_put_provider_key_literal[
                 ".supports_websockets=", "false"

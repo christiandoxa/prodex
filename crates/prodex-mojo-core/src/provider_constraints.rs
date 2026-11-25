@@ -252,7 +252,12 @@ fn cached_provider_surface_label(
 pub fn provider_id_label(value: i64) -> Result<&'static str, crate::MojoError> {
     static LABELS: std::sync::OnceLock<Result<Vec<String>, crate::MojoError>> =
         std::sync::OnceLock::new();
-    cached_provider_surface_label(&LABELS, PROVIDER_SURFACE_PROVIDER_ID, 7, value)
+    cached_provider_surface_label(
+        &LABELS,
+        PROVIDER_SURFACE_PROVIDER_ID,
+        crate::provider_registry::PROVIDER_REGISTRY_PROVIDER_COUNT,
+        value,
+    )
 }
 
 pub fn provider_wire_format_label(value: i64) -> Result<&'static str, crate::MojoError> {
