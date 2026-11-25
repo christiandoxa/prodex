@@ -11,7 +11,7 @@ Generated from the current prodex_provider_core implementation registry and tran
 | gemini | 23 | translated | true | true | 18/14/3 | translated | emulated | passthrough | passthrough | emulated | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported |
 | kiro | 8 | translated | true | false | 9/6/1 | translated | emulated | translated | translated | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | local | 1 | passthrough | true | false | 10/10/1 | passthrough | emulated | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough |
-| opencode | 0 | passthrough | true | false | 1/1/1 | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| opencode | 1 | passthrough | true | false | 1/1/1 | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 
 Status values: `native`, `translated`, `passthrough`, `emulated`, `partial`, `untested`, `unsupported`.
 

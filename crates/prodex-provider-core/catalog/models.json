@@ -2808,5 +2808,29 @@
       "reasoning": false
     },
     "pricing_known": false
+  },
+  {
+    "provider": "opencode",
+    "owned_by": "moonshotai",
+    "id": "kimi-k3",
+    "display_name": "Kimi K3",
+    "description": "Moonshot AI coding and reasoning model served through the OpenCode Go subscription.",
+    "context_window_tokens": 1048576,
+    "max_output_tokens": 1048576,
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses"
+    ],
+    "aliases": [],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": true,
+      "vision": true,
+      "audio": false,
+      "web_search": false,
+      "reasoning": true
+    },
+    "pricing_known": false
   }
 ]

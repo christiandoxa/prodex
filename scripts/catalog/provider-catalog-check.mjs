@@ -10,7 +10,7 @@ const catalogPath = sourceArg
   ? resolve(root, sourceArg.slice("--source=".length))
   : resolve(root, "crates/prodex-provider-core/catalog/models.json");
 const models = JSON.parse(readFileSync(catalogPath, "utf8"));
-const requiredProviders = ["openai", "anthropic", "copilot", "deepseek", "gemini", "kiro", "local"];
+const requiredProviders = ["openai", "anthropic", "copilot", "deepseek", "gemini", "kiro", "local", "opencode"];
 const validEndpoints = new Set([
   "responses",
   "responses/compact",
@@ -158,6 +158,7 @@ const summary = {
     Gemini: providerCounts.get("gemini") ?? 0,
     Kiro: providerCounts.get("kiro") ?? 0,
     Local: providerCounts.get("local") ?? 0,
+    OpenCode: providerCounts.get("opencode") ?? 0,
   },
   issues,
 };

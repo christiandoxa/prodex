@@ -42,6 +42,7 @@ const providerCountKeys = {
   gemini: "Gemini",
   kiro: "Kiro",
   local: "Local",
+  opencode: "OpenCode",
 };
 const claimedStatuses = new Set(["native", "passthrough", "translated"]);
 

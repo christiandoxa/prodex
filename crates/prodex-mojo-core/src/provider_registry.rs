@@ -420,6 +420,9 @@ mod tests {
             );
         }
         assert_eq!(runtime_metadata(0), Err(MojoError::InvalidInput));
-        assert_eq!(runtime_metadata(7), Err(MojoError::InvalidInput));
+        assert_eq!(
+            runtime_metadata(PROVIDER_REGISTRY_PROVIDER_COUNT as i64),
+            Err(MojoError::InvalidInput)
+        );
     }
 }
