@@ -759,7 +759,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.172.1"
+version = "0.172.2"
 dependencies = [
  "prodex-mojo-core",
  "serde",
@@ -778,11 +778,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-mojo-core"
-version = "0.172.1"
+version = "0.172.2"
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.172.1"
+version = "0.172.2"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -800,7 +800,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.172.1"
+version = "0.172.2"
 dependencies = [
  "aes-gcm-siv",
  "apple-native-keyring-store",
