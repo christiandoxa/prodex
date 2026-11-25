@@ -88,7 +88,7 @@ exec '${process.execPath}' ${workerPath} claude
 `, {mode:0o700});
     const env = {...process.env, PATH:path.join(dir,"bin")+path.delimiter+process.env.PATH,
       HOME:path.join(dir,"home"),RUNNER_TEMP:path.join(dir,"tmp"),GITHUB_PATH:path.join(dir,"github-path"),
-      KIRO_CLI_VERSION:"3.5.0",
+      KIRO_CLI_VERSION:"3.6.0",
       GITHUB_TOKEN:"synthetic-ci-value",GH_TOKEN:"synthetic-ci-value",ACTIONS_ID_TOKEN_REQUEST_TOKEN:"synthetic-ci-value",ACTIONS_RUNTIME_TOKEN:"synthetic-ci-value"};
     const result = spawnSync("bash", ["-c", shell], {env, encoding:"utf8", timeout:10000});
     assert.equal(result.status, scenario === "parallel" ? 0 : 1, result.stdout + result.stderr);
@@ -99,7 +99,7 @@ exec '${process.execPath}' ${workerPath} claude
     else {
       const record = id => JSON.parse(readFileSync(path.join(dir,"started-"+id),"utf8"));
       assert.deepEqual(record("gemini").args,["install","--global","--ignore-scripts","@google/gemini-cli@0.71.1"]);
-      assert.deepEqual(record("kiro").args,["--force","--channel","stable","--version","3.5.0","--no-modify-path"]);
+      assert.deepEqual(record("kiro").args,["--force","--channel","stable","--version","3.6.0","--no-modify-path"]);
       assert.equal(record("copilot").version,"v1.0.114");
       assert.deepEqual(record("claude").args,[]);
       assert.equal(readFileSync(path.join(dir,"github-path"),"utf8").trim(),path.join(dir,"home/.local/bin"));
