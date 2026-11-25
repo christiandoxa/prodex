@@ -11,30 +11,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Include the Go model in the provider catalog (`1260268`)
-# Prodex 0.172.2
-
-## New Features
-
-- Sign in with an OpenCode Go workspace from the interactive `prodex login`
-  menu or by running `prodex login --with-opencode`. Install the official
-  Console CLI with `npm install --global @opencode/console@0.1.16` on Node.js
-  22 or later, then select your Go workspace in the browser.
-- Launch Codex with your subscription using `prodex s --provider opencode`.
-  The Console CLI refreshes the sign-in. You can set `OPENCODE_API_KEY`
-  for headless use or select a Go model with `--model`.
-- OpenCode Go uses Codex's direct Responses transport. If Presidio is enabled
-  in your preferences, pass `--no-presidio` for this launch.
-
-## Bug Fixes
-
-- Include the default Kimi K3 model in the provider catalog so OpenCode Go
-  launches and saved sessions agree on the provider and model.
-
-## Changelog
-
-- Qualify Kiro CLI 3.6.0 for release validation.
-
-Full Changelog: [0.172.1...0.172.2](https://github.com/christiandoxa/prodex/compare/0.172.1...0.172.2)
 
 ## 0.172.1 - 2026-11-24
 
