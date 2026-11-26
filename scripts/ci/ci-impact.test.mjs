@@ -31,6 +31,24 @@ const RUNTIME_HOTPATH_GUARD_SCRIPT_PATH = new URL(
   import.meta.url,
 ).pathname;
 
+function assertSerialAppTestStep(step, label, filter) {
+  assert.deepEqual(step, {
+    label,
+    command: "cargo",
+    args: [
+      "test",
+      "--locked",
+      "-p",
+      "prodex-app",
+      "--lib",
+      filter,
+      "--",
+      "--test-threads=1",
+    ],
+    failOnZeroTests: true,
+  });
+}
+
 test("root package exposes only the maintained developer interface", async () => {
   const packageJson = JSON.parse(
     await fs.readFile(new URL("../../package.json", import.meta.url), "utf8"),
@@ -197,6 +215,67 @@ test("changed-tests uses canonical manifest groups for focused checks", async ()
     "allow-attribute-guard",
     "env-mutation-guard",
   ]);
+});
+
+test("changed-tests runs focused prodex-app tests for CLI and runtime proxy paths", async () => {
+  const cliSteps = await buildSteps(["crates/prodex-app/src/app_commands/selection.rs"]);
+  assertSerialAppTestStep(
+    cliSteps.find(({ label }) => label === "cargo:prodex-app:app-commands"),
+    "cargo:prodex-app:app-commands",
+    "app_commands::",
+  );
+  assert.equal(
+    cliSteps.some(({ args }) => args.join(" ") === "test --locked -q -p prodex-app"),
+    false,
+    "prodex-app's test=false default target must not silently run zero tests",
+  );
+
+  const runtimeSteps = await buildSteps(["crates/prodex-app/src/runtime_proxy/affinity.rs"]);
+  assertSerialAppTestStep(
+    runtimeSteps.find(({ label }) => label === "cargo:prodex-app:runtime-proxy"),
+    "cargo:prodex-app:runtime-proxy",
+    "runtime_proxy::",
+  );
+  assert.ok(runtimeSteps.some(({ label }) => label === "runtime-hotpath-guard"));
+});
+
+test("changed-tests selects Smart Context lib tests with the nonzero guard", async () => {
+  for (const filePath of [
+    "crates/prodex-app/src/runtime_proxy/smart_context.rs",
+    "crates/prodex-context/src/lib.rs",
+  ]) {
+    const step = (await buildSteps([filePath])).find(
+      ({ label }) => label === "cargo:prodex-app:smart-context",
+    );
+
+    assertSerialAppTestStep(step, "cargo:prodex-app:smart-context", "smart_context");
+  }
+});
+
+test("changed-tests selects active provider bridge and runtime config tests", async () => {
+  const paths = [
+    "crates/prodex-app/src/app_commands/gateway.rs",
+    "crates/prodex-app/src/runtime_config.rs",
+    "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs",
+  ];
+  const steps = await buildSteps(paths);
+  const providerBridge = steps.find(({ label }) => label === "cargo:prodex-app:provider-bridge");
+  const runtimeConfig = steps.find(
+    ({ label }) => label === "cargo:prodex-app:runtime-config",
+  );
+
+  assertSerialAppTestStep(
+    providerBridge,
+    "cargo:prodex-app:provider-bridge",
+    "runtime_launch::proxy_startup::provider_bridge::tests::",
+  );
+  assertSerialAppTestStep(
+    runtimeConfig,
+    "cargo:prodex-app:runtime-config",
+    "runtime_config::environment::tests::",
+  );
+  assert.equal(steps.some(({ label }) => ["gateway-admin-auth", "gateway-usage"].includes(label)), false);
+  assert.ok(steps.some(({ label }) => label === "runtime-hotpath-guard"));
 });
 
 test("changed-tests keeps uncategorized node scripts conservative", async () => {

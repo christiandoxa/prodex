@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { git, normalizeGitPath } from "./guard-common.mjs";
-import { formatCommand, runStep, runStepsSerial } from "./main-internal-test-runner.mjs";
+import { cargoTestStep, formatCommand, runStep, runStepsSerial } from "./main-internal-test-runner.mjs";
 import {
   CHANGELOG_TEST_PATH,
   CAPTURE_REPLAY_FIXTURE_TESTS_PATH,
@@ -328,8 +328,10 @@ function isGatewaySecurityRelevantPath(filePath) {
     filePath === "package.json" ||
     filePath === "scripts/ci/changed-tests.mjs" ||
     filePath === "scripts/ci/test-impact-manifest.json" ||
-    filePath.startsWith("crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_") ||
-    filePath.startsWith("crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_")
+    filePath === "crates/prodex-app/src/app_commands/gateway.rs" ||
+    filePath === "crates/prodex-app/src/runtime_config.rs" ||
+    filePath.startsWith("crates/prodex-app/src/runtime_config/") ||
+    filePath.startsWith("crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge")
   );
 }
 
@@ -359,11 +361,11 @@ async function addCargoSteps(steps, paths) {
 
   for (const filePath of paths) {
     if (isSmartContextPath(filePath)) {
-      addStep(steps, "cargo:prodex-app:smart-context", {
-        label: "cargo:prodex-app:smart-context",
-        command: "cargo",
-        args: ["test", "--locked", "-q", "-p", "prodex-app", "smart_context", "--", "--test-threads=1"],
-      });
+      addStep(
+        steps,
+        "cargo:prodex-app:smart-context",
+        cargoTestStep("cargo:prodex-app:smart-context", "smart_context"),
+      );
       continue;
     }
 
@@ -395,6 +397,14 @@ async function addCargoSteps(steps, paths) {
       continue;
     }
     const packageName = await packageNameForCrateDir(crateDir);
+    if (packageName === "prodex-app") {
+      addStep(
+        steps,
+        "cargo:prodex-app:app-commands",
+        cargoTestStep("cargo:prodex-app:app-commands", "app_commands::"),
+      );
+      continue;
+    }
     addStep(steps, `cargo:${packageName}`, {
       label: `cargo:${packageName}`,
       command: "cargo",
@@ -403,11 +413,11 @@ async function addCargoSteps(steps, paths) {
   }
 
   if (contextTouched) {
-    addStep(steps, "cargo:prodex-app:smart-context", {
-      label: "cargo:prodex-app:smart-context",
-      command: "cargo",
-      args: ["test", "--locked", "-q", "-p", "prodex-app", "smart_context", "--", "--test-threads=1"],
-    });
+    addStep(
+      steps,
+      "cargo:prodex-app:smart-context",
+      cargoTestStep("cargo:prodex-app:smart-context", "smart_context"),
+    );
   }
 }
 
@@ -460,16 +470,22 @@ export async function buildSteps(paths) {
     }
 
     if (isGatewaySecurityRelevantPath(filePath)) {
-      addStep(steps, "gateway-admin-auth", {
-        label: "gateway-admin-auth",
-        command: "cargo",
-        args: ["test", "--locked", "-q", "-p", "prodex-app", "--lib", "gateway_admin_auth", "--", "--test-threads=1"],
-      });
-      addStep(steps, "gateway-usage", {
-        label: "gateway-usage",
-        command: "cargo",
-        args: ["test", "--locked", "-q", "-p", "prodex-app", "--lib", "gateway_usage", "--", "--test-threads=1"],
-      });
+      addStep(
+        steps,
+        "cargo:prodex-app:provider-bridge",
+        cargoTestStep(
+          "cargo:prodex-app:provider-bridge",
+          "runtime_launch::proxy_startup::provider_bridge::tests::",
+        ),
+      );
+      addStep(
+        steps,
+        "cargo:prodex-app:runtime-config",
+        cargoTestStep(
+          "cargo:prodex-app:runtime-config",
+          "runtime_config::environment::tests::",
+        ),
+      );
     }
 
     if (isReleaseGuardFixturesRelevantPath(filePath)) {
@@ -551,6 +567,11 @@ export async function buildSteps(paths) {
         command: "node",
         args: ["scripts/ci/runtime-hotpath-guard.mjs"],
       });
+      addStep(
+        steps,
+        "cargo:prodex-app:runtime-proxy",
+        cargoTestStep("cargo:prodex-app:runtime-proxy", "runtime_proxy::"),
+      );
     }
 
     if (pathMatchesGroup(filePath, PATH_GROUP_NAMES.runtimeManifestRelevant)) {
