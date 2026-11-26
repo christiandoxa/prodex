@@ -15,19 +15,19 @@ fn test_session_report(id: &str) -> SessionReport {
 fn session_output_mode_comes_from_mojo_and_preserves_conflict_error() {
     assert_eq!(
         session_output_mode(false, false, false).unwrap(),
-        SessionOutputMode::Text
+        SessionOutputPlan::Text
     );
     assert_eq!(
         session_output_mode(true, false, false).unwrap(),
-        SessionOutputMode::Json
+        SessionOutputPlan::Json
     );
     assert_eq!(
         session_output_mode(false, true, false).unwrap(),
-        SessionOutputMode::IdOnly
+        SessionOutputPlan::IdOnly
     );
     assert_eq!(
         session_output_mode(false, false, true).unwrap(),
-        SessionOutputMode::ResumeCommand
+        SessionOutputPlan::ResumeCommand
     );
     assert_eq!(
         session_output_mode(true, true, false)

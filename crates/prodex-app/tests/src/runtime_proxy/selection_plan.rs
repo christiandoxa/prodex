@@ -1,4 +1,9 @@
 use super::*;
+use prodex_quota::{UsageResponse, UsageWindow, WindowPair};
+use prodex_runtime_quota::{RuntimeRouteSelectionEntry, RuntimeSelectionProfileEntry};
+use prodex_runtime_state::RuntimeQuotaWindowStatus;
+use prodex_shared_types::RuntimeProfileProbeCacheEntry;
+use prodex_state::ProfileProvider;
 
 #[test]
 fn probe_plan_queues_cold_profiles_for_background_refresh() {
@@ -192,7 +197,11 @@ fn candidate_plan_reuses_supplied_ready_candidates_without_rebuilding() {
         3,
         ready_candidates,
         None,
-        runtime_response_candidate_execution_options(None, None, |_| 0),
+        RuntimeResponseCandidateExecutionOptions {
+            prompt_cache_key: None,
+            prompt_cache_owner_profile: None,
+            jitter_for: |_| 0,
+        },
     )
     .expect("Mojo candidate plan should be valid");
 
@@ -261,7 +270,11 @@ fn candidate_plan_excludes_failed_profiles_from_ready_and_fallback_candidates() 
         3,
         ready_candidates,
         None,
-        runtime_response_candidate_execution_options(None, None, |_| 0),
+        RuntimeResponseCandidateExecutionOptions {
+            prompt_cache_key: None,
+            prompt_cache_owner_profile: None,
+            jitter_for: |_| 0,
+        },
     )
     .expect("Mojo candidate plan should be valid");
 

@@ -1,8 +1,7 @@
 # Prodex Architecture Map
 
-This repository is a Rust workspace with focused crates under `crates/` plus the root `prodex`
-package. Its three thin composition roots are `src/main.rs`, `src/bin/prodex-gateway.rs`, and
-`src/bin/prodex-control-plane.rs`; `src/lib.rs` is their shared compatibility facade.
+Prodex is a Rust workspace with focused crates under `crates/` plus the root `prodex` package.
+The root package builds the workspace's single CLI binary and its compatibility library facade.
 
 ## Command Path
 
@@ -10,26 +9,29 @@ Normal command flow:
 
 ```text
 argv
-  -> prodex-cli
+  -> src/main.rs
+  -> prodex::main_entry (re-exported from prodex-app)
+  -> prodex-app::startup
+  -> prodex-cli parsing
   -> prodex-app command_dispatch
   -> prodex-app command handler
   -> focused helper crates
   -> prodex-app reports / prodex-terminal-ui for human output
 ```
 
-Dedicated enterprise flows enter through `prodex-gateway` or `prodex-control-plane`, then cross
-the gateway/control-plane adapter crates into `prodex-application` and backend-neutral
-`prodex-storage` contracts. Pure policy and identity decisions remain in `prodex-domain`.
+The `prodex gateway` command is dispatched through `prodex-app` and starts the
+OpenAI-compatible provider bridge. Keep dependency direction inward. Pure policy and identity
+decisions belong in `prodex-domain`, reusable provider/proxy/state helpers belong in their existing
+focused crates, and live composition stays in `prodex-app`. Focused crates must not depend back on
+`prodex-app`.
 
-Dependency direction is inward:
+Gateway compatibility surfaces include the provider bridge and the runtime broker registry.
 
-- domain types do not depend on HTTP, processes, providers, or concrete storage;
-- application use cases depend on ports, not concrete adapters;
-- provider and storage adapters accept validated plans and point toward those ports;
-- `prodex-app` and the dedicated binaries compose concrete adapters but must not
-  duplicate authentication, authorization, admission, accounting, or routing policy;
-- shared DTOs move to an existing inward crate only when multiple real consumers need them;
-- no focused crate may depend back on `prodex-app`.
+- `prodex gateway` and its OpenAI-compatible provider bridge are part of the CLI contract.
+- The runtime broker still derives the legacy `/backend-api/prodex/v<version>` mount path when an
+  older registry record lacks an explicit path.
+- `npm/prodex-gateway-sdk` contains client methods for admin and billing. Verify a matching
+  server implementation before documenting endpoint support.
 
 Key crates and files:
 
@@ -96,11 +98,17 @@ Runtime proxy edit points:
 - Live orchestration: `crates/prodex-app/src/runtime_proxy`.
 - Side-effect-free proxy helpers, the bounded route-decision trace, and gateway request-constraint planning: `crates/prodex-runtime-proxy`.
 - Provider catalog limits, request-requirement parsing, token estimation, and pure model constraint evaluation: `crates/prodex-provider-core`.
-- Gateway live-plan orchestration and the authenticated, side-effect-free route-explain HTTP/dashboard edge: `crates/prodex-app/src/runtime_launch/proxy_startup`.
-- Launch planning: `crates/prodex-app/src/runtime_launch`, `prodex-runtime-launch`, `prodex-runtime-claude`, `prodex-runtime-anthropic`.
+- Gateway startup and provider translation: `crates/prodex-app/src/app_commands/gateway.rs`,
+  `crates/prodex-app/src/runtime_launch`, and `crates/prodex-app/src/runtime_launch/proxy_startup`.
+- Launch planning: `crates/prodex-app/src/runtime_launch`, `prodex-runtime-launch`.
 - Policy and tuning: `prodex-runtime-policy`, `prodex-runtime-tuning`,
   `crates/prodex-app/src/runtime_policy.rs`, and the [runtime policy reference](runtime-policy.md).
 - Benchmark support: `prodex-bench-support`, root `benches/`.
+
+For fresh profile selection, start in `crates/prodex-app/src/runtime_proxy/selection/next.rs`. Its
+`prepare` module reads current quota and load from the selection catalog. The app's
+`selection_plan.rs` builds inputs for `prodex-runtime-proxy`, which calls the Mojo candidate
+planner. The app walks the returned candidates and owns retries and transport effects.
 
 ## State And Persistence
 
@@ -119,12 +127,9 @@ Key crates:
 - `prodex-runtime-state`: runtime lane counters, bindings, snapshots, and scheduled-save models.
 - `prodex-runtime-store`: merge and compaction helpers for persisted runtime state.
 - `prodex-session-store`: persisted shared Codex session metadata helpers.
-- `prodex-secret-store`: development storage primitives and the bounded,
-  read-only projected external-secret provider described by
-  [ADR 0009](enterprise-governance/adrs/0009-external-secret-vault.md). Explicit
-  production gateway policy resolves typed credential references through that
-  provider at startup and rejects raw CLI/environment sources as recorded in
-  the [security test matrix](security-test-matrix.md).
+- `prodex-secret-store`: profile secret storage and reusable bounded, read-only
+  projected secret resolution. The external provider design is recorded in
+  [ADR 0009](enterprise-governance/adrs/0009-external-secret-vault.md).
 - `prodex-profile-export`: encrypted import/export envelopes.
 
 Persistence rules:
@@ -132,10 +137,6 @@ Persistence rules:
 - Cross-process saves must remain merge-safe for active profile, last-run timestamps, response bindings, and session bindings.
 - Runtime state saves must not block request/stream commit paths.
 - Add merge/persistence regression tests when changing state shape or save behavior.
-- PostgreSQL recovery must pass the Docker-backed logical dump/restore gate for
-  recovery-point age, restore time, tenant-table completeness, accounting
-  consistency, post-backup exclusion, and non-owner RLS isolation; see the
-  [storage, HA, backup, and DR contract](enterprise-governance/09-storage-ha-backup-and-dr.md).
 
 ## Quota, Doctor, Observability
 
@@ -155,7 +156,7 @@ Key crates:
   provider order, and profile rotation while Rust retains state and time normalization.
 - `prodex-runtime-doctor`: runtime diagnostics parsing, summaries, suggestions, and rendering.
 - `prodex-runtime-log`: runtime log path and marker helpers.
-- `prodex-runtime-broker`, `prodex-runtime-broker-log`, `prodex-runtime-metrics`: broker registry DTOs, log parsing, and Prometheus rendering.
+- `prodex-runtime-broker`, `prodex-runtime-broker-log`, and `prodex-observability`: broker registry DTOs, log parsing, and telemetry attributes.
 - `prodex-audit-log`: append/query/render helpers for structured audit events.
 - `prodex-redaction`: shared diagnostic redaction helpers.
 

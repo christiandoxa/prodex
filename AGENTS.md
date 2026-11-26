@@ -24,33 +24,38 @@ fixtures, and new documentation must be in English.
 
 ## Project summary and ownership
 
-Prodex is a Rust workspace whose CLI wraps Codex and manages isolated `CODEX_HOME` profiles.
-It also builds dedicated gateway and control-plane entrypoints. Keep composition roots thin:
+Prodex is a Rust workspace whose root package provides the CLI and a compatibility library
+facade. The root binary in `src/main.rs` calls `prodex::main_entry`; `src/lib.rs` re-exports
+`prodex-app`, where `main_entry` lives in `crates/prodex-app/src/startup.rs`. The single
+executable includes the `prodex gateway` command, which starts the provider bridge through
+the existing runtime proxy.
 
-- `src/main.rs`, `src/bin/`, and `src/lib.rs` wire entrypoints and compatibility facades.
+Current ownership:
+
 - `prodex-cli` owns Clap parsing, help, defaults, and command normalization.
-- `prodex-app` owns CLI command routing, application composition, profile flows, runtime
-  launch, and live orchestration. It must not become the home for reusable domain, storage,
-  rendering, provider, or transport-neutral logic.
-- `prodex-application` owns side-effect-free use-case plans and ports. Concrete transports,
-  providers, and storage adapters belong in composition roots.
-- `prodex-domain` owns pure identifiers, security context, policy, accounting, and governance
-  decisions. It must not depend on HTTP, CLI, database drivers, filesystem/process APIs,
-  providers, or network clients.
-- `prodex-runtime-proxy` owns proxy boundary types, classifiers, affinity/health/admission
-  helpers, compatibility transforms, and bounded transport executors. Keep it hot-path-safe;
-  live launch and app orchestration remain in `prodex-app`.
-- `prodex-runtime-*` crates own focused runtime policy, state, quota, launch, diagnostics,
-  broker, and provider-runtime boundaries; inspect the owning crate before editing.
-- `prodex-gateway-core` owns HTTP-neutral admission/routing contracts; `prodex-gateway-http`
-  owns framework-neutral HTTP policy; `prodex-gateway-server` owns bounded async Hyper/TLS
-  serving. Do not move policy into the server adapter.
-- `prodex-storage` owns adapter-neutral commands and contracts. Driver-free SQL/plans belong
-  in `prodex-storage-postgres`, `prodex-storage-redis`, or `prodex-storage-sqlite`; async or
-  blocking execution belongs in the matching `*-runtime` adapter. DDL and migrations stay out
-  of request-serving paths.
+- `prodex-app` owns startup, CLI command routing, profile flows, runtime launch, provider
+  integrations, and live orchestration. Reusable domain, persistence, provider-contract,
+  rendering, and transport-neutral logic belongs in existing focused crates where available.
+- `prodex-domain` owns pure identifiers, secret wrappers, policy, and governance decisions. It
+  must not depend on HTTP, CLI, database drivers, filesystem/process APIs, providers, or
+  network clients.
+- `prodex-runtime-proxy` owns hot-path proxy boundary types, classifiers, affinity/health/
+  admission helpers, compatibility transforms, and bounded route-planning helpers. Live
+  transport and app orchestration remain in `prodex-app`.
+- Existing `prodex-runtime-*` crates own focused policy, state, quota, launch, diagnostics, broker,
+  and log boundaries; inspect the owning manifest and module before editing.
+- `prodex-state`, `prodex-runtime-state`, `prodex-runtime-store`, and `prodex-session-store` own
+  profile/runtime models and persistence helpers. Do not infer database adapter crates from
+  documentation or deployment directories.
+- `prodex-provider-core` and `prodex-provider-spi` own provider metadata/contracts; provider
+  execution and live translation stay in the app runtime.
+- `prodex-mojo-core` owns the versioned deterministic Mojo kernels and Rust bridge contracts.
 - `prodex-terminal-ui` stays generic: terminal dimensions, layout, text, and rendering helpers;
-  app- or runtime-specific report models stay in report crates or `prodex-app`.
+  app- or runtime-specific report models stay in `prodex-app`.
+
+The tracked `npm/prodex-gateway-sdk` contains client contracts for admin and billing methods.
+Check the owning server before documenting support for those methods. The runtime broker retains
+the legacy `/backend-api/prodex/v<version>` mount-path fallback for older registry records.
 
 Focused crates must not depend upward on `prodex-app`. Reuse an existing inward crate before
 adding a new one. Introduce a crate only for a durable ownership boundary with more than one
@@ -330,9 +335,8 @@ files and a directory may have at most 9 near-limit production siblings.
   `SecretRef`/projected resolution; secret or JWKS network fetches must not occur on request
   paths. Do not put prompts, request bodies, cookies, bearer values, credentials, tenant
   secrets, or filesystem paths in route traces or metric labels.
-- PostgreSQL is durable enterprise accounting state; Redis is for rate limiting, short-lived
-  cache, and rebuildable coordination, not the billing ledger. Keep migrations/DDL explicit and
-  outside request handling.
+- Keep persistence in the existing profile/runtime state owners. Do not treat deployment
+  directories or legacy enterprise documents as evidence of active database adapters.
 - Tracked examples and tests must use reserved domains (`example.com`), generic paths such as
   `/home/test-user`, synthetic profile names, and fake IDs/tokens. Never copy real emails,
   paths, overlay/session/attachment IDs, logs, auth data, credentials, or customer identifiers.
@@ -378,10 +382,11 @@ Before changing a shared or public contract, search for breakage across:
 
 - CLI flags, defaults, help, exit status, and terminal output;
 - `policy.toml`, environment variables, serialized state, and persisted affinity/bindings;
-- gateway/control-plane HTTP status, headers, bodies, routes, pagination, and auth behavior;
+- the `prodex gateway` OpenAI-compatible behavior, runtime proxy mount paths, and auth metadata;
 - provider translations, upstream Responses/compact/SSE/WebSocket semantics, and preserved
   metadata;
-- public Rust crate APIs and the npm gateway SDK;
+- public Rust crate APIs and the tracked `npm/prodex-gateway-sdk` API; verify which server
+  implements each SDK endpoint before treating it as a supported runtime contract;
 - log markers, metric names, diagnostics, release/install behavior, and versioned docs.
 
 For upstream compatibility changes, run the local offline baseline and replay checks. Use the
@@ -415,8 +420,7 @@ exact commands and results; do not claim a skipped or failed command passed.
   `cargo test --locked -q -p prodex-app --lib 'main_internal_tests::runtime_proxy_' -- --test-threads=1`,
   `node scripts/ci/runtime-hotpath-guard.mjs --self-test && node scripts/ci/runtime-hotpath-guard.mjs`, `node scripts/ci/runtime-test-manifest-guard.mjs`, and
   `node scripts/compat/check-upstream-baseline.mjs && node scripts/compat/capture-replay-fixture-tests.mjs`; add bounded load smoke for admission/latency changes.
-- Dependency or boundary changes: `node scripts/ci/crate-boundary-guard.mjs --self-test && node scripts/ci/crate-boundary-guard.mjs` plus the owning domain,
-  gateway, storage, auth, provider, or application boundary guard.
+- Dependency or boundary changes: `node scripts/ci/crate-boundary-guard.mjs --self-test && node scripts/ci/crate-boundary-guard.mjs`, plus any additional boundary guard wired to the changed owner in CI.
 - Broad, release-adjacent, or high-risk changes: `npm run ci`; add
   `npm run test:serial -- --suite all` when global state/runtime paths changed and
   `npm run test:full -- --timings` when full workspace evidence is required.

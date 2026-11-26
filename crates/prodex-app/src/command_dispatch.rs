@@ -1,4 +1,21 @@
-use super::*;
+use anyhow::Result;
+use prodex_cli::{Commands, ProfileCommands, SuperArgs};
+use prodex_runtime_launch::prodex_dry_run_requested;
+
+use crate::app_commands::{
+    handle_doctor, handle_gateway, handle_info, handle_log, handle_mcp_jsonl_bridge, handle_ping,
+    handle_prodex_update, handle_quota, handle_redeem, handle_runtime_broker, handle_session,
+    handle_status, handle_super, handle_super_native_agy, resolve_super_sub_agent,
+    runtime_launch::handle_run, stored_presidio_preference, super_uses_native_agy,
+};
+use crate::profile_commands::{
+    handle_add_profile, handle_codex_login, handle_codex_logout, handle_current_profile,
+    handle_export_profiles, handle_import_current_profile, handle_import_profiles,
+    handle_list_profiles, handle_remove_profile, handle_set_active_profile,
+    recover_pending_profile_lifecycle,
+};
+use crate::runtime_tools::{handle_sub_agent_exec, handle_super_runtime_tools_dry_run};
+use crate::super_expose::handle_super_expose;
 
 #[derive(Debug)]
 pub(crate) struct ProdexCommandExit {
@@ -97,14 +114,6 @@ pub(crate) fn command_startup_policy(
         .expect("Mojo app command startup policy returned invalid output")
 }
 
-pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
-    command_startup_policy(command).show_update_notice
-}
-
-pub(crate) fn command_is_super_dry_run(command: &Commands) -> bool {
-    command_startup_policy(command).super_dry_run
-}
-
 pub(crate) fn execute_command(command: Commands) -> Result<()> {
     let _insecure_file_access =
         profile_command_requests_insecure(&command).then(secret_store::allow_insecure_file_access);
@@ -126,10 +135,10 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Quota(args) => handle_quota(args),
         Commands::Redeem(args) => handle_redeem(args),
         Commands::Ping(command) => handle_ping(command),
-        Commands::Run(args) => app_commands::runtime_launch::handle_run(args),
+        Commands::Run(args) => handle_run(args),
         Commands::Super(args) => execute_super(*args),
         Commands::Gateway(args) => handle_gateway(args),
-        Commands::SuperExpose(args) => super_expose::handle_super_expose(*args),
+        Commands::SuperExpose(args) => handle_super_expose(*args),
         Commands::RuntimeBroker(args) => handle_runtime_broker(args),
         Commands::McpJsonlBridge(args) => handle_mcp_jsonl_bridge(args),
         Commands::SubAgentExec(args) => handle_sub_agent_exec(args),
@@ -184,10 +193,10 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use prodex_cli::parse_cli_command_from;
 
     use super::{
-        command_is_super_dry_run, command_runs_profile_lifecycle_recovery,
-        command_should_show_update_notice, command_uses_native_agy, parse_cli_command_from,
+        command_runs_profile_lifecycle_recovery, command_startup_policy, command_uses_native_agy,
     };
 
     #[test]
@@ -209,12 +218,12 @@ mod tests {
         ])
         .expect("native tail dry-run should parse");
 
-        assert!(command_is_super_dry_run(&native));
-        assert!(command_is_super_dry_run(&native_tail));
-        assert!(!command_should_show_update_notice(&native));
+        assert!(command_startup_policy(&native).super_dry_run);
+        assert!(command_startup_policy(&native_tail).super_dry_run);
+        assert!(!command_startup_policy(&native).show_update_notice);
         assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&native));
-        assert!(command_is_super_dry_run(&codex));
-        assert!(!command_should_show_update_notice(&codex));
+        assert!(command_startup_policy(&codex).super_dry_run);
+        assert!(!command_startup_policy(&codex).show_update_notice);
         assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&codex));
     }
 
@@ -222,7 +231,7 @@ mod tests {
     fn info_is_read_only_startup_surface() {
         let command = parse_cli_command_from(["prodex", "info"]).unwrap();
         assert!(!command_runs_profile_lifecycle_recovery(&command));
-        assert!(!command_should_show_update_notice(&command));
+        assert!(!command_startup_policy(&command).show_update_notice);
         assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&command));
     }
 
@@ -230,7 +239,7 @@ mod tests {
     fn log_is_read_only_startup_surface() {
         let command = parse_cli_command_from(["prodex", "log", "last"]).unwrap();
         assert!(!command_runs_profile_lifecycle_recovery(&command));
-        assert!(!command_should_show_update_notice(&command));
+        assert!(!command_startup_policy(&command).show_update_notice);
         assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&command));
     }
 
@@ -262,7 +271,7 @@ mod tests {
         for command in [&direct, &tail] {
             assert!(command_uses_native_agy(command));
             assert!(!command_runs_profile_lifecycle_recovery(command));
-            assert!(!command_should_show_update_notice(command));
+            assert!(!command_startup_policy(command).show_update_notice);
             assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(command));
         }
     }

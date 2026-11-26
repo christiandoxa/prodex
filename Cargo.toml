@@ -74,25 +74,19 @@ anyhow = "1.0.105"
 argon2 = "0.6.0"
 arc-swap = "1.9.5"
 base64 = "0.23.1"
-aws-lc-rs = "1.19.0"
 bytes = "1.12.2"
 # Host compatibility alias: Jiff-backed implementation; registry Chrono is removed.
 chrono = { package = "prodex-time", path = "crates/prodex-time", version = "0.172.2" }
 clap = { version = "4.6.9", features = ["derive"] }
 codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config", version = "0.172.2" }
-deadpool-postgres = "=0.14.2"
 dirs = "7.0.0"
 fs2 = "0.4.3"
 filetime = "0.2.30"
 getrandom = "0.4.3"
-http-body-util = "0.1.5"
-hyper = "1.13.0"
-hyper-util = "0.1.21"
 keyring-core = "1.1.0"
 libc = "0.2.191"
 os_info = "3.15.0"
 pbkdf2 = "0.13.0"
-portable-pty = "0.9.0"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 unicode-width = "0.2.3"
 prodex_app = { package = "prodex-app", path = "crates/prodex-app", version = "0.172.2" }
@@ -135,11 +129,8 @@ reqwest = { version = "0.13.5", default-features = false }
 rpassword = "7.5.5"
 crossterm = "0.29.0"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
-postgres = "0.19.14"
-redis = { version = "1.8.3", default-features = false }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-native-certs = "0.8.5"
-tokio-rustls = "0.26.6"
 runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.172.2" }
 runtime_proxy_crate = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.172.2" }
 secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-store", version = "0.172.2" }
@@ -152,8 +143,6 @@ tiktoken-rs = "=0.12.1"
 terminal_ui = { package = "prodex-terminal-ui", path = "crates/prodex-terminal-ui", version = "0.172.2" }
 tiny_http = "0.12.0"
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "signal", "time"] }
-tokio-postgres = "=0.7.18"
-tokio-postgres-rustls = { version = "0.14.0", features = ["aws-lc-rs"] }
 toml = "1.2.2"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 uuid = { version = "1.29.3", features = ["serde", "v7"] }

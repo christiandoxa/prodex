@@ -1,5 +1,17 @@
-use super::*;
 use chrono::Local;
+use runtime_proxy_crate::RuntimeResponseCandidatePlanOptions;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+use crate::runtime_proxy::{
+    AuthSummary, RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS, ReadyProfileCandidate,
+    RunProfileProbeJob, RunProfileProbeReport, RuntimeProbeCacheFreshness,
+    RuntimeProfileUsageSnapshot, RuntimeQuotaSource, RuntimeQuotaSummary, RuntimeRouteKind,
+    RuntimeRouteSelectionCatalog, active_profile_selection_order_with_view,
+    runtime_profile_probe_cache_freshness, runtime_proxy_responses_quota_critical_floor_percent,
+    runtime_quota_summary_from_usage_snapshot_at, runtime_route_selection_view,
+    runtime_snapshot_blocks_same_request_cold_start_probe, runtime_usage_snapshot_is_usable,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimePlannedProbeRefresh {
@@ -164,16 +176,6 @@ pub(crate) struct RuntimeResponsePlannedCandidate {
     pub(crate) fallback_skip_reason: Option<&'static str>,
 }
 
-impl RuntimeResponsePlannedCandidate {
-    pub(crate) fn ready_skip_reason(&self) -> Option<&'static str> {
-        self.ready_skip_reason
-    }
-
-    pub(crate) fn fallback_skip_reason(&self) -> Option<&'static str> {
-        self.fallback_skip_reason
-    }
-}
-
 pub(crate) struct RuntimeResponseCandidateExecutionOptions<'a, F>
 where
     F: Fn(&str) -> u64,
@@ -181,21 +183,6 @@ where
     pub(crate) prompt_cache_key: Option<&'a str>,
     pub(crate) prompt_cache_owner_profile: Option<&'a str>,
     pub(crate) jitter_for: F,
-}
-
-pub(crate) fn runtime_response_candidate_execution_options<'a, F>(
-    prompt_cache_key: Option<&'a str>,
-    prompt_cache_owner_profile: Option<&'a str>,
-    jitter_for: F,
-) -> RuntimeResponseCandidateExecutionOptions<'a, F>
-where
-    F: Fn(&str) -> u64,
-{
-    RuntimeResponseCandidateExecutionOptions {
-        prompt_cache_key,
-        prompt_cache_owner_profile,
-        jitter_for,
-    }
 }
 
 pub(crate) use runtime_proxy_crate::{
@@ -331,13 +318,14 @@ where
     let proxy_plan = runtime_proxy_crate::build_runtime_response_candidate_execution_plan(
         candidate_inputs,
         excluded_profiles,
-        runtime_proxy_crate::runtime_response_candidate_plan_options(
+        RuntimeResponseCandidatePlanOptions {
             route_kind,
             inflight_soft_limit,
             prompt_cache_key,
             prompt_cache_owner_profile,
-            runtime_proxy_responses_quota_critical_floor_percent(),
-        ),
+            responses_critical_floor_percent: runtime_proxy_responses_quota_critical_floor_percent(
+            ),
+        },
     )
     .map_err(|error| anyhow::anyhow!("Mojo runtime candidate plan failed: {error:?}"))?;
 

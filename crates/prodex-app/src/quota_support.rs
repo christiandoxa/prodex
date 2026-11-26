@@ -212,18 +212,6 @@ pub(crate) struct DoctorProfileReport {
     pub(crate) quota: Option<std::result::Result<ProviderQuotaSnapshot, String>>,
 }
 
-pub(crate) fn collect_quota_reports(state: &AppState, base_url: Option<&str>) -> Vec<QuotaReport> {
-    collect_quota_reports_with_auth_filter(state, base_url, &QuotaAuthFilter::All)
-}
-
-pub(crate) fn collect_quota_reports_with_auth_filter(
-    state: &AppState,
-    base_url: Option<&str>,
-    auth_filter: &QuotaAuthFilter,
-) -> Vec<QuotaReport> {
-    collect_quota_reports_with_filters(state, base_url, auth_filter, QuotaProviderFilter::All)
-}
-
 pub(crate) fn collect_quota_reports_with_filters(
     state: &AppState,
     base_url: Option<&str>,

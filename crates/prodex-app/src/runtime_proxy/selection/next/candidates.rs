@@ -1,4 +1,21 @@
-use super::super::*;
+use anyhow::Result;
+use std::collections::BTreeSet;
+
+use super::super::{
+    runtime_selection_log_fields_with_quota, runtime_selection_quota_source_label,
+    runtime_selection_trace_candidate, runtime_selection_trace_planned_candidate,
+    runtime_selection_trace_reject,
+};
+use crate::runtime_proxy::{
+    RuntimeResponseCandidateExecutionPlan, RuntimeResponsePlannedCandidate,
+    RuntimeRotationProxyShared, RuntimeRouteKind, RuntimeRouteSelectionCatalog,
+    active_profile_selection_order_with_view,
+    reserve_runtime_profile_route_circuit_half_open_probe, runtime_best_auto_redeem_profile_name,
+    runtime_profile_inflight_hard_limited_for_context, runtime_profile_quota_summary_for_route,
+    runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+    runtime_quota_source_label, runtime_route_kind_inflight_context, runtime_route_kind_label,
+    runtime_route_selection_view, runtime_waitable_candidate_eligible,
+};
 
 pub(super) fn record_runtime_response_candidates(
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
@@ -19,7 +36,7 @@ pub(super) fn record_runtime_response_candidates(
             runtime_proxy_crate::RuntimeRouteCandidateClass::Ready,
         );
         traced.eligibility = runtime_proxy_crate::RuntimeRouteCandidateEligibility::Deferred;
-        if let Some(reason) = candidate.ready_skip_reason() {
+        if let Some(reason) = candidate.ready_skip_reason {
             runtime_selection_trace_reject(&mut traced, reason, None);
         }
         trace.record_candidate(&candidate.name, traced);
@@ -65,8 +82,8 @@ impl RuntimeResponseCandidatePass {
 
     fn skip_reason(self, candidate: &RuntimeResponsePlannedCandidate) -> Option<&'static str> {
         match self {
-            Self::Ready => candidate.ready_skip_reason(),
-            Self::Fallback => candidate.fallback_skip_reason(),
+            Self::Ready => candidate.ready_skip_reason,
+            Self::Fallback => candidate.fallback_skip_reason,
         }
     }
 }

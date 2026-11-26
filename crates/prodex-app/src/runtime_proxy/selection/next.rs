@@ -1,4 +1,21 @@
-use super::*;
+use anyhow::Result;
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
+
+#[cfg(test)]
+use super::runtime_selection_trace_builder;
+use crate::runtime_proxy::{
+    RuntimeResponseCandidateExecutionOptions, RuntimeResponseCandidateExecutionPlan,
+    RuntimeRotationProxyShared, RuntimeRouteKind, active_profile_selection_order_with_view,
+    build_runtime_response_candidate_execution_plan, runtime_last_chance_candidate_eligible,
+    runtime_profile_inflight_hard_limited_for_context, runtime_profile_selection_jitter,
+    runtime_prompt_cache_bound_profile, runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_precommit_budget, runtime_proxy_structured_log_message,
+    runtime_route_kind_inflight_context, runtime_route_kind_label, runtime_route_selection_view,
+    wait_for_runtime_probe_refresh_progress,
+};
 
 mod candidates;
 mod prepare;
@@ -55,11 +72,11 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
             prepared.inflight_soft_limit,
             std::mem::take(&mut prepared.ready_candidates),
             requested_model,
-            runtime_response_candidate_execution_options(
+            RuntimeResponseCandidateExecutionOptions {
                 prompt_cache_key,
-                prompt_cache_owner.as_deref(),
-                |name| runtime_profile_selection_jitter(shared, name, route_kind),
-            ),
+                prompt_cache_owner_profile: prompt_cache_owner.as_deref(),
+                jitter_for: |name| runtime_profile_selection_jitter(shared, name, route_kind),
+            },
         )?;
         log_runtime_response_selection_plan(
             shared,
@@ -174,11 +191,11 @@ pub(crate) fn runtime_quota_last_chance_profile_for_route(
         prepared.inflight_soft_limit,
         std::mem::take(&mut prepared.ready_candidates),
         requested_model,
-        runtime_response_candidate_execution_options(
+        RuntimeResponseCandidateExecutionOptions {
             prompt_cache_key,
-            prompt_cache_owner.as_deref(),
-            |name| runtime_profile_selection_jitter(shared, name, route_kind),
-        ),
+            prompt_cache_owner_profile: prompt_cache_owner.as_deref(),
+            jitter_for: |name| runtime_profile_selection_jitter(shared, name, route_kind),
+        },
     )?;
     log_runtime_response_selection_plan(
         shared,
@@ -201,7 +218,7 @@ pub(crate) fn runtime_quota_last_chance_profile_for_route(
                 auth_failure_active: false,
                 backoff_kind: i64::try_from(candidate.backoff_sort_key.0)
                     .map_err(|_| anyhow::anyhow!("candidate backoff kind exceeds ABI range"))?,
-                fallback_skip_present: candidate.fallback_skip_reason().is_some(),
+                fallback_skip_present: candidate.fallback_skip_reason.is_some(),
             },
         )?;
         if !eligible

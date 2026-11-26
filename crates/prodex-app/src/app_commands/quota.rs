@@ -1,13 +1,20 @@
 use anyhow::{Context, Result, bail};
+use prodex_cli::QuotaArgs;
+use prodex_core::AppPaths;
+use prodex_quota::QuotaAuthFilter;
+use prodex_state::AppState;
+use terminal_ui::{print_stdout_line, print_stdout_text};
 
-use crate::{
-    AppPaths, AppState, AppStateIoExt, QuotaArgs, QuotaAuthFilter, QuotaProviderFilter,
-    collect_quota_reports, collect_quota_reports_with_filters, fetch_profile_quota,
-    fetch_profile_quota_json, print_stdout_line, print_stdout_text, quota_watch_enabled,
-    render_all_quota_reports_once_tui, render_profile_quota_once_tui, render_quota_reports,
-    resolve_profile_name, save_openai_quota_runtime_usage_snapshot,
-    save_openai_quota_runtime_usage_snapshots, watch_all_quotas, watch_quota,
+use super::shared::try_inline_stdout_terminal;
+use crate::app_state::AppStateIoExt;
+use crate::quota_support::{
+    QuotaProviderFilter, collect_quota_reports_with_filters, fetch_profile_quota,
+    fetch_profile_quota_json, quota_watch_enabled, render_all_quota_reports_once_tui,
+    render_profile_quota_once_tui, render_profile_quota_snapshot_with_detail, render_quota_reports,
+    save_openai_quota_runtime_usage_snapshot, save_openai_quota_runtime_usage_snapshots,
+    watch_all_quotas, watch_quota,
 };
+use crate::runtime_launch::resolve_profile_name;
 
 pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
@@ -67,24 +74,18 @@ fn handle_all_quota(
             provider_filter_locked,
         );
     }
-    let reports = if matches!(auth_filter, QuotaAuthFilter::All)
-        && matches!(provider_filter, QuotaProviderFilter::All)
-    {
-        collect_quota_reports(state, args.base_url.as_deref())
-    } else {
-        collect_quota_reports_with_filters(
-            state,
-            args.base_url.as_deref(),
-            &auth_filter,
-            provider_filter,
-        )
-    };
+    let reports = collect_quota_reports_with_filters(
+        state,
+        args.base_url.as_deref(),
+        &auth_filter,
+        provider_filter,
+    );
     let height = reports
         .len()
         .saturating_mul(if args.detail { 4 } else { 3 })
         .saturating_add(8)
         .clamp(8, 32) as u16;
-    if let Some(mut terminal) = crate::try_inline_stdout_terminal(height) {
+    if let Some(mut terminal) = try_inline_stdout_terminal(height) {
         terminal.draw(|frame| render_all_quota_reports_once_tui(frame, &reports, args.detail))?;
         let _ = terminal.show_cursor();
     } else {
@@ -121,19 +122,17 @@ fn handle_profile_quota(paths: &AppPaths, state: &AppState, args: &QuotaArgs) ->
     }
 
     let quota = fetch_profile_quota(&profile.provider, &codex_home, args.base_url.as_deref())?;
-    if let Some(mut terminal) = crate::try_inline_stdout_terminal(12) {
+    if let Some(mut terminal) = try_inline_stdout_terminal(12) {
         terminal.draw(|frame| {
             render_profile_quota_once_tui(frame, &profile_name, quota.clone(), args.detail)
         })?;
         let _ = terminal.show_cursor();
     } else {
-        print_stdout_text(
-            &crate::quota_support::render_profile_quota_snapshot_with_detail(
-                &profile_name,
-                &quota,
-                args.detail,
-            ),
-        )?;
+        print_stdout_text(&render_profile_quota_snapshot_with_detail(
+            &profile_name,
+            &quota,
+            args.detail,
+        ))?;
     }
     save_openai_quota_runtime_usage_snapshot(paths, &state.profiles, &profile_name, &quota);
     Ok(())

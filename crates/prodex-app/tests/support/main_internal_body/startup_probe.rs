@@ -1,4 +1,8 @@
 use super::*;
+use crate::startup::{
+    main_entry_error_is_broken_pipe, main_entry_error_message, main_entry_exit_code,
+    validate_command_runtime_policy,
+};
 
 #[test]
 fn main_entry_exit_code_respects_command_exit_errors() {
@@ -50,8 +54,7 @@ fn invalid_runtime_policy_does_not_block_doctor_or_profile_recovery() {
     );
     clear_runtime_policy_cache();
 
-    let doctor =
-        parse_cli_command_from(["prodex", "doctor", "--runtime", "--json"]).unwrap();
+    let doctor = parse_cli_command_from(["prodex", "doctor", "--runtime", "--json"]).unwrap();
     let profiles = parse_cli_command_from(["prodex", "profile", "list"]).unwrap();
     let runtime = parse_cli_command_from(["prodex", "run"]).unwrap();
 
@@ -69,8 +72,8 @@ fn invalid_runtime_policy_does_not_block_doctor_or_profile_recovery() {
 
 #[test]
 fn main_entry_error_message_redacts_secret_like_chain() {
-    let err = anyhow::anyhow!("failed: Authorization: Bearer main-entry-token")
-        .context("command failed");
+    let err =
+        anyhow::anyhow!("failed: Authorization: Bearer main-entry-token").context("command failed");
 
     let message = main_entry_error_message(&err);
 

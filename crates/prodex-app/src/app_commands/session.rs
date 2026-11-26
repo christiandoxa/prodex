@@ -93,43 +93,29 @@ fn load_session_reports(
     Ok(reports)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionOutputMode {
-    Text,
-    Json,
-    IdOnly,
-    ResumeCommand,
-}
-
 fn session_output_mode(
     json: bool,
     id_only: bool,
     resume_command: bool,
-) -> Result<SessionOutputMode> {
-    let selected = session_cli_mojo::output_mode(json, id_only, resume_command)
+) -> Result<SessionOutputPlan> {
+    session_cli_mojo::output_mode(json, id_only, resume_command)
         .map_err(|error| anyhow::anyhow!("Mojo session output planner rejected input: {error:?}"))?
         .ok_or_else(|| {
             anyhow::anyhow!("--json, --id-only, and --resume-command cannot be combined")
-        })?;
-    Ok(match selected {
-        SessionOutputPlan::Text => SessionOutputMode::Text,
-        SessionOutputPlan::Json => SessionOutputMode::Json,
-        SessionOutputPlan::IdOnly => SessionOutputMode::IdOnly,
-        SessionOutputPlan::ResumeCommand => SessionOutputMode::ResumeCommand,
-    })
+        })
 }
 
 fn print_session_reports(
     reports: &[SessionReport],
-    output_mode: SessionOutputMode,
+    output_mode: SessionOutputPlan,
     empty_message: &str,
 ) -> Result<()> {
     match output_mode {
-        SessionOutputMode::IdOnly => {
+        SessionOutputPlan::IdOnly => {
             print_session_lines(reports.iter().map(|report| report.id.clone()))?;
             Ok(())
         }
-        SessionOutputMode::ResumeCommand => {
+        SessionOutputPlan::ResumeCommand => {
             print_session_lines(
                 reports
                     .iter()
@@ -137,8 +123,8 @@ fn print_session_reports(
             )?;
             Ok(())
         }
-        SessionOutputMode::Json | SessionOutputMode::Text => {
-            let json = output_mode == SessionOutputMode::Json;
+        SessionOutputPlan::Json | SessionOutputPlan::Text => {
+            let json = output_mode == SessionOutputPlan::Json;
             let output = render_session_reports_output(reports, json, empty_message)
                 .context("failed to render session JSON")?;
             if json {

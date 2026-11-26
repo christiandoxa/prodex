@@ -89,6 +89,7 @@ mod runtime_tools;
 mod secret_store_support;
 mod shared_codex_fs;
 mod shared_types;
+mod startup;
 mod super_expose;
 #[cfg(test)]
 mod test_support;
@@ -146,10 +147,10 @@ pub(crate) use runtime_thread_index::*;
 use runtime_tools::*;
 use shared_codex_fs::*;
 pub(crate) use shared_types::*;
+pub use startup::main_entry;
 use terminal_ui::*;
 #[cfg(test)]
 pub(crate) use test_support::*;
-use update_notice::*;
 
 #[cfg(test)]
 #[path = "../tests/src/runtime_proxy_contract.rs"]
@@ -314,125 +315,6 @@ mod runtime_request_id_tests {
             second >> RUNTIME_REQUEST_SEQUENCE_LOCAL_BITS
         );
     }
-}
-
-pub fn main_entry() {
-    // A low shell soft limit must not strand state loading, runtime sockets or
-    // child launch. Failure is nonfatal; normal I/O still reports its real error.
-    let _ = process_resources::prepare_descriptor_headroom();
-    let result = match app_commands::runtime_launch::goal_resume::handle_runtime_goal_session_notify_if_requested() {
-        Ok(true) => Ok(()),
-        Ok(false) => run(),
-        Err(err) => Err(err),
-    };
-    if let Err(err) = result {
-        if main_entry_error_is_broken_pipe(&err) {
-            return;
-        }
-        let _ = writeln!(
-            io::stderr().lock(),
-            "Error: {}",
-            main_entry_error_message(&err)
-        );
-        std::process::exit(main_entry_exit_code(&err));
-    }
-}
-
-fn main_entry_error_is_broken_pipe(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .downcast_ref::<io::Error>()
-            .is_some_and(|error| error.kind() == io::ErrorKind::BrokenPipe)
-    })
-}
-
-fn main_entry_exit_code(err: &anyhow::Error) -> i32 {
-    err.downcast_ref::<command_dispatch::ProdexCommandExit>()
-        .map_or(1, command_dispatch::ProdexCommandExit::code)
-}
-
-fn main_entry_error_message(err: &anyhow::Error) -> String {
-    redaction_redact_secret_like_text(&format!("{err:#}"))
-}
-
-fn run() -> Result<()> {
-    let command = parse_cli_command_or_exit();
-    run_command(command)
-}
-
-fn run_command(command: Commands) -> Result<()> {
-    let super_dry_run = command_dispatch::command_is_super_dry_run(&command);
-    let minimal_startup = command_uses_minimal_startup(&command);
-    if !super_dry_run && !minimal_startup {
-        create_codex_home_if_missing(&AppPaths::discover()?.root)?;
-        if command_dispatch::command_should_show_update_notice(&command) {
-            let _ = show_update_notice_if_available(&command);
-        }
-    }
-    validate_command_runtime_policy(&command)?;
-    if !super_dry_run && !minimal_startup {
-        schedule_prodex_auto_runtime_housekeeping(&command);
-    }
-    command_dispatch::execute_command(command)
-}
-
-fn command_uses_minimal_startup(command: &Commands) -> bool {
-    command_dispatch::command_startup_policy(command).minimal_startup
-        || matches!(
-            command,
-            Commands::Doctor(args)
-                if args.install
-                    && !args.quota
-                    && !args.runtime
-                    && !args.repair_import_auth_journals
-                    && args.bundle.is_none()
-        )
-}
-
-#[cfg(test)]
-mod minimal_startup_tests {
-    use super::{command_uses_minimal_startup, parse_cli_command_from};
-
-    #[test]
-    fn doctor_install_alone_uses_minimal_startup() {
-        let install = parse_cli_command_from(["prodex", "doctor", "--install"]).unwrap();
-        let combined =
-            parse_cli_command_from(["prodex", "doctor", "--install", "--runtime"]).unwrap();
-        let bridge =
-            parse_cli_command_from(["prodex", "__mcp-jsonl-bridge", "mcp-server"]).unwrap();
-        let ping = parse_cli_command_from(["prodex", "ping", "openai"]).unwrap();
-        let antigravity =
-            parse_cli_command_from(["prodex", "s", "gemini", "--cli", "agy", "--no-presidio"])
-                .unwrap();
-
-        assert!(command_uses_minimal_startup(&install));
-        assert!(command_uses_minimal_startup(&bridge));
-        assert!(command_uses_minimal_startup(&ping));
-        assert!(command_uses_minimal_startup(&antigravity));
-        assert!(!command_uses_minimal_startup(&combined));
-    }
-}
-
-fn validate_command_runtime_policy(command: &Commands) -> Result<()> {
-    if command.launches_runtime() && !command_dispatch::command_uses_native_agy(command) {
-        ensure_runtime_policy_valid()?;
-    }
-    Ok(())
-}
-
-fn parse_cli_command_or_exit() -> Commands {
-    match parse_cli_command_from(env::args_os()) {
-        Ok(command) => command,
-        Err(err) => err.exit(),
-    }
-}
-
-fn parse_cli_command_from<I, T>(args: I) -> std::result::Result<Commands, clap::Error>
-where
-    I: IntoIterator<Item = T>,
-    T: Into<OsString>,
-{
-    prodex_cli::parse_cli_command_from(args)
 }
 
 fn claude_bin() -> OsString {
