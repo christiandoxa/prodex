@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::{
     AppPaths, AuthSummary, RecoveredLoad, acquire_state_file_lock, compact_app_state,
-    load_json_file_with_backup, load_json_file_with_backup_unlocked, merge_app_state_for_save,
-    read_auth_summary, state_last_good_file_path, write_state_json_atomic,
+    load_json_file_with_backup, load_json_file_with_backup_unlocked, read_auth_summary,
+    state_last_good_file_path, write_state_json_atomic,
 };
 
 pub(crate) use prodex_state::{
@@ -126,7 +126,7 @@ fn save_app_state(state: &AppState, paths: &AppPaths, removed: &[String]) -> Res
         existing.profiles.remove(profile_name);
         desired.profiles.remove(profile_name);
     }
-    let merged = merge_app_state_for_save(existing, &desired);
+    let merged = prodex_state::merge_app_state_for_save(existing, &desired);
     let merged = compact_app_state(merged, Local::now().timestamp());
     let json = serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
     write_state_json_atomic(paths, &json)?;

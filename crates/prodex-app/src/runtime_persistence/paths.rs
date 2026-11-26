@@ -1,13 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::{AppPaths, AppState, last_good_file_path};
+use crate::{AppPaths, last_good_file_path};
 
 pub(crate) const RUNTIME_LIVE_LOG_SOURCE_KEY_PREFIX: &str = "live-";
-
-pub(crate) fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState {
-    prodex_state::merge_app_state_for_save(existing, desired)
-}
 
 pub(crate) fn runtime_continuations_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("runtime-continuations.json")

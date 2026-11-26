@@ -5,6 +5,9 @@ use prodex_mojo_core::runtime::{
     websocket_read_action,
 };
 use redaction::redaction_redact_secret_like_text;
+mod socket;
+pub(crate) use socket::*;
+
 mod connect;
 mod control;
 pub(in crate::runtime_proxy) use control::forward_runtime_websocket_interrupt;

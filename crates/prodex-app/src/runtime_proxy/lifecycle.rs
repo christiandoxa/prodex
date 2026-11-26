@@ -16,6 +16,25 @@ pub(crate) use wait::{
     runtime_profile_wait_outcome_label, wait_for_runtime_probe_refresh_progress,
 };
 
+pub(crate) struct RuntimeRotationProxy {
+    #[cfg(test)]
+    pub(crate) test_lane_admission: RuntimeProxyLaneAdmission,
+    pub(crate) runtime_config: Arc<RuntimeConfig>,
+    pub(crate) server: Arc<tiny_http::Server>,
+    pub(crate) draining: Arc<AtomicBool>,
+    pub(crate) shutdown: Arc<AtomicBool>,
+    pub(crate) worker_threads: Vec<thread::JoinHandle<()>>,
+    pub(crate) accept_worker_count: usize,
+    pub(crate) listen_addr: std::net::SocketAddr,
+    pub(crate) realtime_ws_sidecar_addr: Option<std::net::SocketAddr>,
+    pub(crate) realtime_ws_model: Option<String>,
+    pub(crate) log_path: PathBuf,
+    pub(crate) active_request_count: Arc<AtomicUsize>,
+    pub(crate) owner_lock: Option<StateFileLock>,
+    pub(crate) _live_log_source: Option<RuntimeLiveLogSourceGuard>,
+    pub(crate) _marker_guard: RuntimeProxyMarkerGuard,
+}
+
 impl Drop for RuntimeRotationProxy {
     fn drop(&mut self) {
         self.draining.store(true, Ordering::SeqCst);

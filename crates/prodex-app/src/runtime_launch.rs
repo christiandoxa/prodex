@@ -18,10 +18,10 @@ use plan::cleanup_runtime_launch_plan;
 pub(super) use plan::{ChildProcessPlan, RuntimeLaunchPlan};
 #[cfg(test)]
 pub(super) use prodex_profile_identity::validate_profile_name;
-pub(super) use profile::{
-    ensure_path_is_unique, record_run_selection, resolve_profile_name,
-    should_enable_runtime_rotation_proxy,
+pub(super) use prodex_runtime_launch::{
+    ensure_profile_path_is_unique as ensure_path_is_unique, resolve_profile_name,
 };
+pub(super) use profile::{record_run_selection, should_enable_runtime_rotation_proxy};
 #[cfg(test)]
 pub(super) use proxy_args::normalize_run_codex_args;
 pub(super) use proxy_args::{

@@ -22,6 +22,7 @@ mod profile_state;
 mod quota;
 mod realtime_sidecar;
 mod recovery_deadline;
+mod request_id;
 mod response_forwarding;
 mod responses;
 mod selection;
@@ -63,6 +64,7 @@ pub(crate) use self::realtime_sidecar::*;
 pub(crate) use self::recovery_deadline::{
     RuntimeProxyRecoveryTimeout, reject_runtime_proxy_recovery_timeout,
 };
+pub(crate) use self::request_id::*;
 pub(crate) use self::response_forwarding::*;
 pub(crate) use self::responses::proxy_runtime_responses_request;
 #[cfg(test)]
@@ -108,6 +110,10 @@ pub(super) use runtime_proxy_crate::{
     runtime_proxy_precommit_budget_for_profile_count,
     runtime_record_previous_response_not_found_retry_state, runtime_wait_affinity_owner,
 };
+
+pub(crate) fn runtime_proxy_log(shared: &RuntimeRotationProxyShared, message: impl AsRef<str>) {
+    crate::runtime_core_shared::runtime_proxy_log_to_path(&shared.log_path, message.as_ref());
+}
 
 pub(super) fn runtime_proxy_local_selection_failure_message() -> &'static str {
     "Runtime proxy could not secure a healthy upstream profile before the pre-commit retry budget was exhausted. Retry the request."
