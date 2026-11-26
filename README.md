@@ -83,40 +83,19 @@ Prodex supports two provider paths:
 
 </details>
 
-`prodex gateway` exposes the provider bridge as a standalone OpenAI-compatible service for non-Codex clients:
-
-<details>
-<summary>Gateway quickstart</summary>
+`prodex gateway` starts the OpenAI-compatible provider bridge in the foreground. The listener defaults to loopback
+with an ephemeral port and prints its endpoint when ready. Use `--listen ADDR` to choose the
+listener address, `--provider` to select a supported provider, and the provider's environment
+variable or `--api-key` for upstream authentication:
 
 ```bash
-PRODEX_GATEWAY_TOKEN=change-me GEMINI_API_KEY=... prodex gateway --provider gemini
-auth_header="Authorization: Bearer $PRODEX_GATEWAY_TOKEN"
-curl http://127.0.0.1:4000/v1/responses \
-  -H "$auth_header" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"prodex-fast","input":"hello"}'
+GEMINI_API_KEY=... prodex gateway --provider gemini
 ```
 
-</details>
-
-<details>
-<summary>Gateway capabilities (advanced)</summary>
-
-The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It adds `x-prodex-call-id` to responses, writes local request detail plus `gateway_spend` events for both `request` and `response` phases to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, supports catalog-backed policy routing strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) for model aliases/fallback chains, can enforce static virtual keys with persisted request/spend usage plus model/budget/RPM/TPM limits, supports file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, and can apply keyword/model, local PII redaction, Presidio, and external webhook guardrails before calls and on outputs. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can list usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, inspect usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, inspect provider adapter contracts at `/v1/prodex/gateway/providers` or offline with `prodex gateway providers --json`, inspect active observability and guardrail configuration at `/v1/prodex/gateway/observability` and `/v1/prodex/gateway/guardrails`, fetch the checked-in gateway OpenAPI document at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`; the document describes the gateway's documented routes, not complete upstream OpenAPI or provider semantics, and `/v1/a2a` is separate from local `prodex super --sub-agent` execution. Policy/env-backed keys remain read-only, SCIM users can carry tenant/team/project/user/budget scopes for SSO/OIDC fallback, admin-managed key and SCIM user mutations emit `prodex audit` events, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix plus tenant/team/project/user/budget scopes. Configure defaults under `[gateway]` in `policy.toml`; validate provider catalog edits with `node scripts/catalog/provider-catalog-check.mjs`. The generated provider matrix lives in [docs/provider-capabilities.md](./docs/provider-capabilities.md).
-
-The gateway can enforce optional model-aware request constraints under `[gateway.request_constraints]`; compatibility defaults leave enforcement disabled and oversized output requests unchanged. Admin/viewer principals can use the dashboard Route Workbench or `POST /v1/prodex/gateway/routes/explain` to inspect the same bounded planner trace without sending upstream traffic or mutating quota, billing, affinity, circuit, admission, or persisted runtime state. Explain payloads and prompt content are not logged or stored.
-
-Gateway virtual-key realtime WebSocket sessions use bounded 32 KiB frames, a five-minute session ceiling, an upfront token reservation, per-frame accounting, and terminal usage reconciliation. One governed provider/profile is fixed before upgrade; policy denial or token exhaustion closes the session without rotation.
-
-Governance policy/classification/provider-registry lifecycle endpoints require SQLite or PostgreSQL state. File and Redis remain compatibility backends for the documented admin/usage surfaces and return `501 governance_policy_operation_unsupported` for governance lifecycle operations; bank mode requires PostgreSQL.
-
-Enterprise OTLP export endpoints from `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` must be absolute `http://` or `https://` URLs without whitespace, userinfo, query strings, or fragments; put collector credentials in `OTEL_EXPORTER_OTLP_HEADERS`. `prodex-control-plane plan-http-control-plane` request files must use the top-level `principal` field and non-credential HTTP headers, because `Authorization` headers are rejected.
-
-`[gateway.adaptive_routing]` is opt-in. With `enabled = true`, Prodex keeps bounded per-model outcome/latency windows and can reorder only fresh pre-commit alias fallbacks; `shadow_mode = true` records the recommendation without changing selection. Hard continuation affinity, quota filtering, and the no-mid-stream-rotation boundary remain authoritative. Optional `exploration_rate` is deterministic per request and bounded from `0.0` to `1.0`.
-
-JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for `/v1/responses` plus gateway key, usage, billing ledger, metrics, and OpenAPI admin calls.
-
-</details>
+The bridge supports Responses, Chat Completions, Messages, embeddings, and model-catalog routes
+where the selected provider supports them. See the [provider capability matrix](./docs/provider-capabilities.md)
+for provider-specific support. The private `npm/prodex-gateway-sdk` client and enterprise design
+material record the retired admin, billing, SCIM, governance, database, and control-plane contracts.
 
 <details>
 <summary>Provider behavior details (advanced)</summary>
@@ -1265,7 +1244,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - [LOCAL.md](./LOCAL.md) — self-hosted local model setup and testing
 - [docs/state-model.md](./docs/state-model.md) — state ownership and persistence model
 - [docs/runtime-policy.md](./docs/runtime-policy.md) — runtime policy keys, environment overrides, and runtime log path resolution
-- [docs/deployment.md](./docs/deployment.md) — Docker Compose scaffold for the standalone gateway
+- [docs/deployment.md](./docs/deployment.md) — current CLI container notes and retained legacy deployment reference
 - [docs/harness-modes.md](./docs/harness-modes.md) — Harness Mode semantics, evaluated policies, scope, and diagnostics
 - [docs/sub-agents.md](./docs/sub-agents.md) — Super sub-agent CLI, child command, and isolation contract
 - [docs/testing.md](./docs/testing.md) — contributor testing guidance

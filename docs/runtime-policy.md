@@ -3,20 +3,16 @@
 Prodex reads `policy.toml` from the Prodex root, usually `~/.prodex/policy.toml` unless `PRODEX_HOME` is set.
 Environment variables override policy values, and unset values fall back to built-in defaults.
 
-Core runtime-proxy, broker, WebSocket, smart-context, request-body, and OIDC
-timing settings are captured in one typed snapshot at startup. The environment
-is read once per key and policy is loaded once for that snapshot; active
-requests and broker polling loops do not re-read those inputs. Configuration
-errors are aggregated, report key names without values, and stop proxy startup
-before the listener is bound. Changing these inputs therefore requires a
-restart. Legacy lenient inputs keep their documented/default behavior and emit
-`runtime_config_compatibility_default` with the key name only.
+The current `prodex-runtime-policy` parser reads only `version`, `[runtime]`,
+`[runtime_proxy]`, and `[secrets]`. The enterprise gateway/control-plane
+material below records the retired service's configuration and security design.
 
-Policy-file validation also evaluates independent runtime, secret, proxy, and
-gateway sections before returning. A single invalid setting keeps its existing
-error text; multiple invalid sections are reported in deterministic section
-order without including configured values. Rust callers that need structured
-diagnostics can downcast the error to `RuntimePolicyValidationErrors`.
+Runtime and proxy settings are captured in typed startup snapshots. Active
+requests and broker polling loops do not re-read those inputs. Configuration
+errors report key names without configured values and stop proxy startup before
+the listener is bound. Changing these inputs therefore requires a restart.
+Legacy lenient environment inputs keep their documented/default behavior and
+emit `runtime_config_compatibility_default` with the key name only.
 
 Relative `runtime.log_dir` values are resolved under the Prodex root. `PRODEX_RUNTIME_LOG_DIR` is used as provided.
 Live `prodex log stream` and `prodex log upstream` data is published through the authenticated runtime broker and retained only in a bounded in-memory window by default. Raw runtime-log recording is opt-in with `PRODEX_RUNTIME_LOG_RECORD=1`; recorded files remain byte-, count-, total-size-, and age-bounded. `prodex s expose` is the narrow exception: it always records bounded redacted expose activity metadata into the same runtime-log directory so `prodex log` can account for endpoint actions even when raw proxy recording is disabled. Expose audit lines never store the capability URL/token, task or request payload text, environment values, stdin contents, or captured stdout/stderr. Direct `prodex_super_exec` audit events do include a bounded redacted command preview, cwd, argument/environment counts, stdin byte count, timeout, duration, status, and exit metadata so `prodex log` shows what was executed without exposing secret-bearing values.
@@ -28,56 +24,64 @@ prodex doctor --runtime --json | jq -r '.log_path'
 prodex doctor --runtime --json | jq -r '.runtime_logs.directory'
 ```
 
-Defaults below are production defaults. Test builds use smaller timeouts and limits in several places.
-
-## Service Mode
-
-| Policy key | Default | Meaning |
-| --- | --- | --- |
-| `service_mode` | `gateway` | Typed process role. `gateway` preserves the data-plane policy contract. `control-plane` is accepted only by the dedicated control-plane entrypoint and requires production projected secrets, a projected `role = "admin"` token, shared PostgreSQL or Redis state, and a `required_scope = "control_plane"` workload-identity block as the native mTLS transport identity. Control-plane policies reject provider, data-plane auth, virtual-key, routing, SSO, outbound observability, request-constraint, and guardrail capabilities. Bank control-plane policies additionally require at least two distinct projected admin principals per explicit tenant. |
-
-`prodex-gateway` and the compatibility gateway command reject
-`service_mode = "control-plane"`. Conversely, `prodex-control-plane serve`
-requires that explicit mode; an absent policy therefore cannot silently start a
-control-plane listener.
-
 ## Runtime Keys
+
+Defaults in the active runtime sections are production defaults. Test builds
+use smaller timeouts and limits in several places.
 
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |
 | `runtime.log_dir` | `PRODEX_RUNTIME_LOG_DIR` | OS temp directory, usually `/tmp` on Linux | Directory used for explicit bounded runtime-log recording and legacy-log cleanup. |
 | `runtime.log_format` | `PRODEX_RUNTIME_LOG_FORMAT` | `text` | Runtime proxy log format. Valid values: `text`, `json`. |
+| `secrets.backend` | `PRODEX_SECRET_BACKEND` | `file` | Backend for Prodex-owned runtime broker capability secrets: `file` or `keyring`. |
+| `secrets.keyring_service` | `PRODEX_SECRET_KEYRING_SERVICE` | empty | Exact non-empty, whitespace-free OS-keyring service name, required only when `secrets.backend = "keyring"`. |
 | bounded runtime recording | `PRODEX_RUNTIME_LOG_RECORD` | disabled | Explicitly enables bounded raw runtime-log recording. `1`, `true`, `yes`, and `on` enable it; unset or other values keep live telemetry memory/IPC-only. |
 | active recorded file | `PRODEX_RUNTIME_LOG_MAX_BYTES` | `64 MiB` | Maximum bytes for one recorded generation; a single complete oversized record is handled without an infinite rotation loop. |
 | recorded generations | `PRODEX_RUNTIME_LOG_MAX_FILES` | `5` | Maximum retained recorded log files, including the active generation. |
 | recorded directory budget | `PRODEX_RUNTIME_LOG_TOTAL_BYTES` | `256 MiB` | Maximum retained bytes for owned recorded generations. |
 | recorded age | `PRODEX_RUNTIME_LOG_MAX_AGE_SECONDS` | `7 days` | Maximum age for inactive recorded generations. |
 
-## Gateway Keys
+The file/keyring selector does not change Codex-owned profile `auth.json`, MCP
+credentials, or projected secret handling. When keyring is selected, Prodex
+lazily migrates an existing runtime broker capability file only after the
+keyring write succeeds; keyring account names use a bounded hash instead of the
+source path.
 
-`prodex gateway` runs a standalone OpenAI-compatible HTTP gateway.
-Native OpenAI-compatible upstreams are passed through for `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models`.
-Provider bridges translate `/v1/responses` where supported and pass native-compatible side endpoints through to the selected upstream.
+## Retained enterprise service-mode design (not active runtime policy)
 
-Production secret resolution is explicit:
+This section preserves former enterprise security requirements. The current
+workspace has no dedicated gateway or control-plane executable, and the current
+policy parser does not recognize `service_mode`.
 
 | Policy key | Default | Meaning |
 | --- | --- | --- |
-| `secrets.backend` | `file` | Backend for Prodex-owned runtime broker capability secrets: exact `file` or `keyring`. `PRODEX_SECRET_BACKEND` overrides policy. |
-| `secrets.keyring_service` | empty | Exact non-empty, whitespace-free OS-keyring service name. Required only with `secrets.backend = "keyring"`; `PRODEX_SECRET_KEYRING_SERVICE` overrides policy. |
+| `service_mode` | `gateway` | Typed process role in the former design. `gateway` preserved the data-plane policy contract. `control-plane` was accepted only by a dedicated control-plane entrypoint and required production projected secrets, a projected `role = "admin"` token, shared PostgreSQL or Redis state, and a `required_scope = "control_plane"` workload-identity block as the native mTLS transport identity. Control-plane policies rejected provider, data-plane auth, virtual-key, routing, SSO, outbound observability, request-constraint, and guardrail capabilities. Bank control-plane policies additionally required at least two distinct projected admin principals per explicit tenant. |
+
+The former gateway executable rejected `service_mode = "control-plane"`.
+Conversely, `prodex-control-plane serve` required that explicit mode; an absent
+policy could not silently start a control-plane listener. The current workspace
+does not provide either dedicated executable.
+
+## Retained enterprise gateway settings (not active runtime policy)
+
+The settings and endpoint behavior in this section describe the former enterprise
+gateway design. They are retained for security/design traceability only; they are
+not read or enforced by the current runtime policy parser or `prodex gateway`.
+
+The former enterprise design used explicit projected gateway credential settings:
+
+| Policy key | Default | Meaning |
+| --- | --- | --- |
 | `secrets.production` | `false` | When `true`, gateway CLI/environment credential inputs and all gateway `*_env` secret sources are rejected. `gateway.require_auth=true`, `gateway.auth_token_ref` or a referenced virtual key, and `gateway.provider_api_key_ref` are required. |
 | `secrets.projected_root` | empty | Read-only directory projected by External Secrets, Secrets Store CSI, or an equivalent workload-identity adapter. Relative paths resolve under the Prodex root. Required with `projected_provider`. |
 | `secrets.projected_provider` | empty | Exact provider name that every production `SecretRef.provider` must match. Required with `projected_root`. |
 
-Each `*_ref` is a TOML object with exact `provider`, `name`, and optional
+Each `*_ref` in the former gateway design was a TOML object with exact `provider`, `name`, and optional
 `version` fields. Resolution happens during gateway startup, before request
 serving; secret files are not read on the request hot path.
 
-The file/keyring selector does not change Codex-owned profile `auth.json`, MCP
-credentials, or production projected `SecretRef` resolution. When keyring is
-selected, Prodex lazily migrates an existing runtime broker capability file
-only after the keyring write succeeds; keyring account names contain a bounded
-hash instead of the source path.
+The current file/keyring selector does not change Codex-owned profile `auth.json`
+or MCP credentials; its behavior is documented above under Runtime Keys.
 
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |
@@ -396,7 +400,11 @@ webhook_bearer_token_env = "PRODEX_GATEWAY_GUARDRAIL_TOKEN"
 webhook_fail_closed = true
 ```
 
-## Governance authority schemas
+## Retained enterprise governance authority schemas (not active runtime policy)
+
+The governance policy and storage material in this section is retained as
+enterprise design/security evidence. The current runtime policy parser and
+workspace do not implement these authority schemas or their database adapters.
 
 `governance.authority_tenants` is the bounded, typed tenant discovery source for
 SQLite/PostgreSQL governance refresh. It is merged with tenant IDs on static admin

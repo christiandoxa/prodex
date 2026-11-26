@@ -240,10 +240,10 @@ already-wide matrix. Windows `prodex-app` partitions cover
 the runtime-broker and runtime-launch namespaces; those tests are not repeated
 in a second dedicated Windows job.
 
-PostgreSQL backup/restore and accounting-proof helpers, plus the impact
-classifier and manifest that gate them, are always heavy-impact paths. Changes
-to those CI proofs cannot take the lightweight path by changing their own
-classification rules.
+The impact classifier still marks retained PostgreSQL backup/restore and
+accounting-proof helper paths as heavy. This selects the heavy Rust/runtime CI
+jobs; current CI no longer provisions a database or runs those former storage
+proofs. Changes to the classifier and its tests also remain heavy-impact.
 
 When the classifier returns `heavy=false`, cheap and broadly relevant checks still run: formatting, docs lint, secret scan, process guards, and release sync. Use this path for docs-only or similarly low-impact changes once the classifier recognizes them.
 
@@ -397,23 +397,9 @@ node scripts/ci/runtime-hotpath-guard.mjs --self-test && node scripts/ci/runtime
 node scripts/ci/crate-boundary-guard.mjs --self-test && node scripts/ci/crate-boundary-guard.mjs
 node scripts/ci/enterprise-docs-guard.mjs --self-test && node scripts/ci/enterprise-docs-guard.mjs
 node scripts/ci/enterprise-id-boundary-guard.mjs --self-test && node scripts/ci/enterprise-id-boundary-guard.mjs
-node scripts/ci/enterprise-binaries-guard.mjs --self-test && node scripts/ci/enterprise-binaries-guard.mjs
-node scripts/ci/application-boundary-guard.mjs --self-test && node scripts/ci/application-boundary-guard.mjs
-node scripts/ci/auth-boundary-guard.mjs --self-test && node scripts/ci/auth-boundary-guard.mjs
-cargo test --locked -q -p prodex-app --lib gateway_admin_auth -- --test-threads=1 && cargo test --locked -q -p prodex-app --lib gateway_usage -- --test-threads=1
 node scripts/ci/config-boundary-guard.mjs --self-test && node scripts/ci/config-boundary-guard.mjs
-node scripts/ci/control-plane-boundary-guard.mjs --self-test && node scripts/ci/control-plane-boundary-guard.mjs
 node scripts/ci/observability-boundary-guard.mjs --self-test && node scripts/ci/observability-boundary-guard.mjs
 node scripts/ci/provider-spi-boundary-guard.mjs --self-test && node scripts/ci/provider-spi-boundary-guard.mjs
-node scripts/ci/storage-boundary-guard.mjs --self-test && node scripts/ci/storage-boundary-guard.mjs
-node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs
-node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs
-node scripts/ci/storage-postgres-boundary-guard.mjs --self-test && node scripts/ci/storage-postgres-boundary-guard.mjs
-node scripts/ci/storage-redis-boundary-guard.mjs --self-test && node scripts/ci/storage-redis-boundary-guard.mjs
-node scripts/ci/storage-sqlite-boundary-guard.mjs --self-test && node scripts/ci/storage-sqlite-boundary-guard.mjs
-node scripts/ci/gateway-core-boundary-guard.mjs --self-test && node scripts/ci/gateway-core-boundary-guard.mjs
-node scripts/ci/gateway-http-boundary-guard.mjs --self-test && node scripts/ci/gateway-http-boundary-guard.mjs
-node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs
 node scripts/ci/churn-hygiene.mjs
 npm run release:prepare
 node scripts/npm/changelog.mjs --check
@@ -435,6 +421,13 @@ node scripts/ci/runtime-stress.mjs --suite continuation
 node tests/load/mock-upstream.mjs --self-test && node tests/load/runtime-proxy-load.mjs --self-test && node scripts/ci/runtime-load-smoke.mjs
 cargo test -q --workspace --all-features -- --test-threads=1
 ```
+
+`enterprise-docs-guard` and `enterprise-id-boundary-guard` are current CI
+checks. The enterprise binary, application/auth, control-plane, storage,
+database-proof, gateway, and deployment-security scripts are retained design
+and security evidence; current CI does not run them as implementation gates.
+The former `gateway_admin_auth` and `gateway_usage` test filters are not current
+`prodex-app` suites.
 
 To reproduce the two-turn Responses chain against real Codex 0.147, 0.148, and 0.149.1
 binaries with one local provider, profile, model, WebSocket connection, and no
@@ -462,9 +455,17 @@ This focused test is separate from the default CI suite.
 repository scripts and gateway SDK. The fast lane and CI process guard both run
 this command, so adding a test file cannot leave it outside the default gate.
 
-The Redis atomicity tests are explicitly ignored when no disposable Redis URL
-is supplied. CI starts a pinned Redis service and runs them as a required gate.
-The equivalent local command is:
+### Retained enterprise storage proof procedures
+
+The PostgreSQL and Redis procedures below document the former database-backed
+storage design. The current workspace has no `prodex-storage-*` packages, and
+current CI does not provision those databases or run these proofs. Keep these
+details as design/security evidence; they are not current validation commands.
+The impact classifier still treats some former helper paths as heavy, which
+does not mean that a database proof runs.
+
+The former Redis atomicity suite used a disposable Redis URL and was explicitly
+ignored without one. Its historical invocation was:
 
 ```bash
 PRODEX_TEST_REDIS_URL=redis://127.0.0.1:6379/0 \
@@ -472,23 +473,16 @@ PRODEX_TEST_REDIS_URL=redis://127.0.0.1:6379/0 \
   --test redis_rate_limit_runtime -- --ignored --test-threads=1
 ```
 
-`node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs` is the repeatable local helper for the
-database-backed storage race proof. It first verifies its branch-selection
-logic without starting Docker, then uses `PRODEX_TEST_POSTGRES_URL` when
-provided, or starts a temporary local Postgres container when Docker and `psql`
-are available. Heavy CI runs this proof as a required step before the backup and
-restore drill, so storage/runtime changes cannot pass by silently skipping the
-database concurrency evidence.
-Add `--storage-postgres-proof` to `node scripts/ci/preflight.mjs` (or set
-`PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF=1`) when you want that proof included
-in the standard local preflight run.
+The former `storage-postgres-proof.mjs` helper checked a database-backed storage
+race proof. It accepted `PRODEX_TEST_POSTGRES_URL` or started a local Postgres
+container when Docker and `psql` were available. The old preflight option
+`--storage-postgres-proof` is no longer supported.
 
-`node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs` runs the PostgreSQL recovery gate used by
-heavy CI jobs. It requires Docker and the PostgreSQL client, applies the
-external migrator, performs a real `pg_dump`/`pg_restore`, gates recovery-point
-age and restore time, verifies tenant and accounting fingerprints, and writes redacted evidence to
-`target/backup-restore-drill/evidence.json`.
-This logical restore gate does not claim WAL/PITR or production RPO evidence.
+The former `backup-restore-drill.mjs` procedure required Docker and the
+PostgreSQL client, applied an external migrator, performed `pg_dump`/`pg_restore`,
+checked recovery age and restore time, and wrote redacted evidence to
+`target/backup-restore-drill/evidence.json`. It did not claim WAL/PITR or
+production RPO evidence and is not a current CI gate.
 
 Use `node scripts/ci/test-fast.mjs --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
 
@@ -667,7 +661,10 @@ Use `node scripts/ci/test-fast.mjs --no-prebuild` when measuring cold parallel b
 
 Run `node scripts/ci/domain-boundary-guard.mjs --self-test && node scripts/ci/domain-boundary-guard.mjs` after changing `crates/prodex-domain/Cargo.toml` or moving security/accounting identifiers between crates. The guard keeps `prodex-domain` pure by rejecting HTTP, CLI, database, async-runtime, transport, filesystem/process/network, and provider/runtime dependencies and source imports; use `node scripts/ci/domain-boundary-guard.mjs --self-test` after changing the guard itself.
 
-Use `cargo test --locked -q -p prodex-app --lib gateway_admin_auth -- --test-threads=1 && cargo test --locked -q -p prodex-app --lib gateway_usage -- --test-threads=1` after touching gateway admin authentication, OIDC/JWKS admin auth, data-plane auth separation, or gateway usage/budget enforcement. It runs the focused `gateway_admin_auth` and `gateway_usage` `prodex-app` suites that cover missing/unknown role fallback, stale JWKS request-path behavior, admin-token rejection on inference routes, and gateway usage/accounting auth invariants.
+Former gateway admin authentication, OIDC/JWKS separation, and gateway usage
+accounting suites belonged to the retained enterprise server design. Those
+test filters are not registered in the current `prodex-app`; current gateway
+behavior is the provider bridge described in [README](../README.md#gateway).
 
 ### Nonempty auxiliary test selections
 
